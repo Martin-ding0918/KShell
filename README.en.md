@@ -23,7 +23,8 @@ The console top bar and theme follow the system dark mode (captured on a Xiaomi 
 
 ## Known issues
 
-- **Title bar lingers on new session**: creating a new session in the console leaves the page title bar in place; a fix is scheduled for the next release.
+- None. 0.0.1.10 fixes the 0.0.1.9 "title bar lingers on a new session" bug: the top-bar
+  patch no longer keys off the route, so a rebuilt session header is re-compacted right away.
 
 ## Features
 

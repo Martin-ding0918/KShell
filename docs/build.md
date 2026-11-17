@@ -22,8 +22,20 @@ cd apps/mobile && npm start                  # Metro（仅调试包需要）
 公开版签名：`assembleRelease` 必须提供 `ZS_STORE_FILE` 和 `ZS_STORE_PASSWORD`，
 默认别名为 `kshell`。通过本机环境变量 `ORG_GRADLE_PROJECT_ZS_STORE_FILE`、
 `ORG_GRADLE_PROJECT_ZS_STORE_PASSWORD` 传入，不把口令写进命令参数或仓库。
-没有正式密钥时构建会失败，不回退到调试签名。公开版包名为
-`io.github.martinding0918.kshell`，后续升级必须继续使用相同的密钥。
+没有正式密钥时构建会失败，不回退到调试签名。后续升级必须继续使用相同的密钥。
+
+两个 product flavor 共用源码与 versionCode（产物名 `KShell-<版本>-<abi>-release.apk`，
+调试包带 `-self` / `-public` 以便同机并存；总包 `assembleRelease` 依次产出两个渠道）：
+
+| flavor | 包名 | 渠道 |
+|---|---|---|
+| `public` | `io.github.martinding0918.kshell` | KShell-public 公开版，应用内检查公开更新 |
+| `self` | `com.zshell` | 私有 KShell 自用版，覆盖 0.0.1.8 及更早版本、配对数据连续；设置页指向私有仓库，不检查更新 |
+
+单渠道构建：`./gradlew assembleSelfRelease` / `assemblePublicRelease`。
+
+两个 flavor 用 `create()` 声明（`public` 是 Groovy 关键字，直接 `public { }` 会让整份
+构建脚本解析失败），且注释里不要出现不成对的英文撇号（Groovy 会当成字符串起始）。
 
 模拟器调试（本机 MuMu 约定端口 16512）：
 

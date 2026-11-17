@@ -52,6 +52,13 @@ P-1 matchMedia 移动端输入判定（ZCode 控制台）、P-2 relay WebSocket 
 P-3 `AbortSignal.any` polyfill（Kimi Code 登录依赖它，模拟器/容器常见的旧版
 系统 WebView 没有；环境已原生支持时自动不注入）。
 
+此外 `apps/mobile/src/kimiTopbar.ts` 是只在 Kimi Code 控制台注入的**样式补丁**
+（不在 patch-bundle 里，因为它依赖宿主桥的消息名）：把官方窄屏页头压成 48px 单行、
+左侧标题截断、右侧插入状态胶囊与菜单浮层。它只在页头结构真正匹配时生效，
+按页头节点本身判断而非路由——0.0.1.9 按 `/devices/` 路由判断，新建会话改变路由后
+紧凑样式被撤销，页面原生的高标题栏就留了下来。SPA 路由切换（pushState /
+replaceState / popstate）与低频兜底扫描负责重新套用。
+
 多宿主（ZCode / Kimi Code）差异全部收敛在 core-shell 的配对解析与凭据模型里
 （`HostKind`），壳层 UI、桥接、通知与生命周期管理两宿主共用；Kimi Code 的账号
 登录由官方页面在壳内覆盖层完成，登录态（Cookie）由系统 WebView 保管、可在设

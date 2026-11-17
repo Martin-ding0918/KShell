@@ -34,18 +34,18 @@ import {makeStyles, Palette, radius, useTheme} from '../theme';
 function statusMeta(
   status: ConsoleStatus,
   colors: Palette,
-): {label: string; color: string} {
+): {label: string; color: string; short: string} {
   switch (status) {
     case 'connecting':
-      return {label: '连接中…', color: colors.star};
+      return {label: '连接中…', short: '连接中', color: colors.star};
     case 'connected':
-      return {label: '已连接', color: colors.success};
+      return {label: '已连接', short: '已连接', color: colors.success};
     case 'waiting':
-      return {label: '等待桌面端上线', color: colors.star};
+      return {label: '等待桌面端上线', short: '等待中', color: colors.star};
     case 'disconnected':
-      return {label: '连接已断开', color: colors.danger};
+      return {label: '连接已断开', short: '已断开', color: colors.danger};
     case 'kicked':
-      return {label: '已在其他设备连接', color: colors.danger};
+      return {label: '已在其他设备连接', short: '已断开', color: colors.danger};
   }
 }
 
@@ -101,13 +101,15 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   const [kimiHeaderReady, setKimiHeaderReady] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
   const patchSource = useMemo(() => buildPatchSource() + (isKimi ? '\n' + KIMI_TOPBAR_PATCH : ''), [isKimi]);
-  const statusDetails = statusMeta(status, colors);
+  const statusDetails = useMemo(() => statusMeta(status, colors), [status, colors]);
   const pushKimiStatus = useCallback(() => {
-    const short = status === 'connected' ? '已连接' : status === 'connecting' ? '连接中' :
-      status === 'waiting' ? '等待中' : '已断开';
-    const value = JSON.stringify({short, label: statusDetails.label, color: statusDetails.color});
+    const value = JSON.stringify({
+      short: statusDetails.short,
+      label: statusDetails.label,
+      color: statusDetails.color,
+    });
     webviewRef.current?.injectJavaScript(`window.__zshellUpdateKimiStatus?.(${value}); true;`);
-  }, [status, statusDetails.label, statusDetails.color]);
+  }, [statusDetails]);
   useEffect(() => {
     if (kimiHeaderReady) pushKimiStatus();
   }, [kimiHeaderReady, pushKimiStatus]);
@@ -160,6 +162,15 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   };
 
   const brand = hostLabel(machine.credentials);
+  // Kimi Code 登录用 window.open 新开 auth.kimi.com 授权页，授权完成后
+  // 原（登录）页面轮询拿到 token 并跳回设备页。壳用覆盖层模拟这个弹窗：
+  // 主窗口保留登录页继续轮询，授权页叠在上层；主窗口离开 /login 时覆盖
+  // 层自动收起。不能丢给系统浏览器——登录态会落进浏览器的 Cookie 存储，
+  // 壳里永远未登录。
+  const [authWindowUrl, setAuthWindowUrl] = useState<string | null>(null);
+  // The bridge handler is created once per machine; menu items reach the
+  // latest reload through a ref so the callback identity stays stable.
+  const reloadRef = useRef<() => void>(() => {});
   const handleBridgeMessage = useCallback(
     (event: WebViewMessageEvent) => {
       const data = event.nativeEvent.data;
@@ -173,6 +184,21 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         }
         if (data === 'zshell:kimi-menu') {
           if (foreground) setControlsVisible(visible => !visible);
+          return;
+        }
+        if (data === 'zshell:kimi-back') {
+          setControlsVisible(false);
+          onBack();
+          return;
+        }
+        if (data === 'zshell:kimi-downloads') {
+          setControlsVisible(false);
+          onOpenDownloads();
+          return;
+        }
+        if (data === 'zshell:kimi-reload') {
+          setControlsVisible(false);
+          reloadRef.current();
           return;
         }
       }
@@ -197,7 +223,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         return next;
       });
     },
-    [notify, brand, isKimi, foreground, pushKimiStatus],
+    [notify, brand, isKimi, foreground, pushKimiStatus, onBack, onOpenDownloads],
   );
 
   const reload = useCallback(() => {
@@ -205,8 +231,14 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     setKimiHeaderReady(false);
     setStatus('connecting');
     setLoadFailed(false);
+    setControlsVisible(false);
+    // A full page load cannot complete an OAuth popup started earlier; leaving
+    // the overlay up would cover the reloaded console forever.
+    setAuthWindowUrl(null);
+    canGoBackRef.current = false;
     setReloadKey(k => k + 1);
   }, []);
+  reloadRef.current = reload;
 
   const statusRef = useRef<ConsoleStatus>('connecting');
   statusRef.current = status;
@@ -264,13 +296,6 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     }
     return false;
   }, []);
-
-  // Kimi Code 登录用 window.open 新开 auth.kimi.com 授权页，授权完成后
-  // 原（登录）页面轮询拿到 token 并跳回设备页。壳用覆盖层模拟这个弹窗：
-  // 主窗口保留登录页继续轮询，授权页叠在上层；主窗口离开 /login 时覆盖
-  // 层自动收起。不能丢给系统浏览器——登录态会落进浏览器的 Cookie 存储，
-  // 壳里永远未登录。
-  const [authWindowUrl, setAuthWindowUrl] = useState<string | null>(null);
 
   const handleOpenWindow = useCallback((event: WebViewOpenWindowEvent) => {
     const target = event.nativeEvent.targetUrl;
@@ -370,12 +395,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
             <TouchableOpacity onPress={onBack} style={styles.backButton}>
               <Text style={styles.backText}>‹ 返回列表</Text>
             </TouchableOpacity>
-            <View
-              style={[
-                styles.statusDot,
-                {backgroundColor: statusMeta(status, colors).color},
-              ]}
-            />
+            <View style={[styles.statusDot, {backgroundColor: statusDetails.color}]} />
             <Text style={styles.title} numberOfLines={1}>
               {machine.name}
             </Text>
@@ -401,15 +421,10 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
             style={styles.statusPill}
             onPress={showControls}
             accessibilityRole="button"
-            accessibilityLabel={`${statusMeta(status, colors).label}，展开控制台操作`}
+            accessibilityLabel={`${statusDetails.label}，展开控制台操作`}
             activeOpacity={0.8}>
-            <View
-              style={[
-                styles.statusDot,
-                {backgroundColor: statusMeta(status, colors).color},
-              ]}
-            />
-            <Text style={styles.pillText}>{statusMeta(status, colors).label}</Text>
+            <View style={[styles.statusDot, {backgroundColor: statusDetails.color}]} />
+            <Text style={styles.pillText}>{statusDetails.label}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -418,13 +433,16 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       {authWindowUrl != null && (
         <View style={styles.authOverlay}>
           <View style={styles.authBar}>
+            <View style={styles.authSide} />
             <Text style={styles.authTitle} numberOfLines={1}>
               {authHostOf(authWindowUrl)} · 授权登录
             </Text>
             <TouchableOpacity
               style={styles.authClose}
+              accessibilityRole="button"
+              accessibilityLabel="关闭授权页"
               onPress={() => setAuthWindowUrl(null)}>
-              <Text style={styles.authCloseText}>✕ 关闭</Text>
+              <Text style={styles.authCloseText}>✕</Text>
             </TouchableOpacity>
           </View>
           <WebView
@@ -461,6 +479,10 @@ const useStyles = makeStyles((colors, font) => ({
     borderRadius: radius.m,
     backgroundColor: colors.bgElevated,
     elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: {width: 0, height: 4},
   },
   controlBar: {
     flex: 1,
@@ -515,11 +537,20 @@ const useStyles = makeStyles((colors, font) => ({
     backgroundColor: colors.bgElevated,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
+    gap: 10,
+    paddingHorizontal: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  authTitle: {...font.body, flex: 1, textAlign: 'center'},
-  authClose: {paddingHorizontal: 12, paddingVertical: 8},
-  authCloseText: {color: colors.accent, fontSize: 14},
+  authTitle: {...font.body, flex: 1, textAlign: 'center', fontWeight: '600'},
+  authSide: {width: 40},
+  authClose: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgInput,
+  },
+  authCloseText: {color: colors.textDim, fontSize: 16},
 }));

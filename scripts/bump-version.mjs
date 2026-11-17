@@ -41,7 +41,7 @@ const USAGE = [
   '                                                         当前无预发布后缀时升级为 <x.y.z>-alpha.1）',
   '',
   '支持 SemVer 或四段 fork 版本号（如 0.0.1.7）。',
-  'versionCode 缺省为当前值 +1；显式指定时必须为大于当前值的整数。',
+  'versionCode 缺省为当前值 +1；显式指定时必须为不小于当前值的整数（双渠道同源时取同值）。',
 ].join('\n');
 
 function die(msg) {
@@ -115,8 +115,11 @@ function main() {
   } else {
     die(`非法 versionCode：${argCode}\n\n${USAGE}`);
   }
-  if (newCode <= currentCode) {
-    die(`versionCode 必须大于当前值 ${currentCode}（收到 ${newCode}）`);
+  // Equal is allowed on purpose: one source feeds two channels with
+  // different package names, and a channel that skipped a release number
+  // (the self-use line skipped 0.0.1.9) catches up on the same versionCode.
+  if (newCode < currentCode) {
+    die(`versionCode 不能小于当前值 ${currentCode}（收到 ${newCode}）`);
   }
 
   const mobilePkgText = read('mobilePkg');

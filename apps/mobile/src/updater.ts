@@ -1,20 +1,36 @@
-import {Platform} from 'react-native';
+import {NativeModules, Platform} from 'react-native';
 import {
   parseLatestRelease,
   pickLatestRelease,
   preferredAbiTags,
   ReleaseInfo,
 } from '@zshell/core-shell';
-import {APP_VERSION} from './version';
 
-export const IS_FORK_BUILD = /^\d+\.\d+\.\d+\.\d+$/.test(APP_VERSION);
+/** Constants from BuildInfoModule, set per product flavor. */
+interface BuildInfoConstants {
+  channel?: string;
+  projectPage?: string;
+}
+
+const build = NativeModules.ZShellBuild as BuildInfoConstants | undefined;
+
+/**
+ * 'public' (KShell-public releases, self-update) or 'self' (private
+ * KShell releases, updated by reinstalling the APK over the old one).
+ * Missing module (tests, odd embedders) falls back to public.
+ */
+export const BUILD_CHANNEL: 'public' | 'self' =
+  build?.channel === 'self' ? 'self' : 'public';
+export const IS_SELF_BUILD = BUILD_CHANNEL === 'self';
 
 const RELEASES_LATEST =
   'https://api.github.com/repos/Amwidtf/zshell/releases/latest';
 const RELEASES_LIST =
   'https://api.github.com/repos/Amwidtf/zshell/releases?per_page=15';
 
-export const PROJECT_PAGE = 'https://github.com/Martin-ding0918/KShell-public';
+export const PROJECT_PAGE =
+  build?.projectPage ??
+  'https://github.com/Martin-ding0918/KShell-public';
 
 export type UpdateChannel = 'stable' | 'beta';
 
@@ -53,7 +69,7 @@ async function getJson(url: string): Promise<unknown | null> {
 export async function fetchLatestRelease(
   channel: UpdateChannel = 'stable',
 ): Promise<ReleaseInfo | null> {
-  if (IS_FORK_BUILD) return null;
+  if (IS_SELF_BUILD) return null;
   if (channel === 'beta') {
     return pickLatestRelease(await getJson(RELEASES_LIST), UPDATE_ABI_TAGS);
   }

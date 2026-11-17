@@ -46,7 +46,7 @@ import {
   startUpdateDownload,
   clearWebSession,
 } from '../downloads';
-import {fetchLatestRelease, IS_FORK_BUILD, PROJECT_PAGE} from '../updater';
+import {fetchLatestRelease, IS_SELF_BUILD, PROJECT_PAGE} from '../updater';
 import type {UpdateChannel} from '../notifications';
 import {biometricLabel} from './LockScreen';
 import {makeStyles, radius, ThemeMode, useTheme} from '../theme';
@@ -853,12 +853,12 @@ export function SettingsScreen({
         <View style={styles.row}>
           <View style={styles.rowMain}>
             <Text style={font.body}>当前版本 v{APP_VERSION}</Text>
-            <Text style={font.faint}>{IS_FORK_BUILD ? 'Fork 版本不使用上游更新' : '从 GitHub Releases 检查新版本'}</Text>
+            <Text style={font.faint}>{IS_SELF_BUILD ? '自用版通过覆盖安装更新，不检查公开频道' : '从 GitHub Releases 检查新版本'}</Text>
           </View>
           <TouchableOpacity
             style={styles.rowButton}
             disabled={
-              IS_FORK_BUILD ||
+              IS_SELF_BUILD ||
               update.kind === 'checking' ||
               update.kind === 'downloading' ||
               update.kind === 'downloadPaused'
@@ -876,8 +876,8 @@ export function SettingsScreen({
             <Text style={font.faint}>发现新版本时本地通知提醒（不自动安装）</Text>
           </View>
           <Switch
-            disabled={IS_FORK_BUILD}
-            value={!IS_FORK_BUILD && prefs.autoCheckUpdates}
+            disabled={IS_SELF_BUILD}
+            value={!IS_SELF_BUILD && prefs.autoCheckUpdates}
             onValueChange={on => {
               const next = {...prefs, autoCheckUpdates: on};
               setPrefs(next);

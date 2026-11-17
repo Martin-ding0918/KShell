@@ -18,7 +18,8 @@
   脚本一次写入：根 `package.json`、`apps/mobile/package.json`、
   `android/app/build.gradle`（versionName + versionCode，缺省 +1）、`src/version.ts`，
   并顺带同步 `package-lock.json` 头部两处 workspace 版本。
-  输入经 Semver 校验，versionCode 必须大于当前值，非法输入直接失败退出。
+  输入经 Semver 校验，versionCode 不能小于当前值（可相等：两条渠道从不同起点
+  并入同一版本时取同值），非法输入直接失败退出。
 
 ## 发布步骤
 
