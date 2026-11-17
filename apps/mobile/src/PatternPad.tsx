@@ -2,11 +2,10 @@ import React, {useRef, useState} from 'react';
 import {
   LayoutChangeEvent,
   PanResponder,
-  StyleSheet,
   Text,
   View,
 } from 'react-native';
-import {colors} from './theme';
+import {makeStyles, useTheme} from './theme';
 
 const GRID = 3;
 const HIT_RADIUS = 46;
@@ -25,6 +24,8 @@ interface PatternPadProps {
 
 /** 3x3 unlock-pattern input. Emits the selected dot order on release. */
 export function PatternPad({size = 300, onComplete, hint}: PatternPadProps) {
+  const {colors} = useTheme();
+  const styles = useStyles();
   const [selected, setSelected] = useState<number[]>([]);
   const selectedRef = useRef<number[]>([]);
   const originRef = useRef({x: 0, y: 0});
@@ -139,26 +140,26 @@ export function PatternPad({size = 300, onComplete, hint}: PatternPadProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(colors => ({
   dot: {
     position: 'absolute',
     width: 52,
     height: 52,
     borderRadius: 26,
     borderWidth: 2,
-    borderColor: '#4a4a4a',
+    borderColor: colors.patternRing,
     alignItems: 'center',
     justifyContent: 'center',
   },
   dotActive: {
     borderColor: colors.accent,
-    backgroundColor: 'rgba(79,156,255,0.18)',
+    backgroundColor: colors.accentSoft,
   },
   dotCore: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#5a5a5a',
+    backgroundColor: colors.patternDot,
   },
   dotOrder: {
     color: colors.accent,
@@ -174,4 +175,4 @@ const styles = StyleSheet.create({
     color: colors.textDim,
     fontSize: 12,
   },
-});
+}));

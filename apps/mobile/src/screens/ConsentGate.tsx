@@ -1,12 +1,12 @@
 import React, {useState} from 'react';
-import {BackHandler, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {BackHandler, Text, TouchableOpacity, View} from 'react-native';
 import {
   PRIVACY_POLICY,
   USER_AGREEMENT,
   LegalDoc,
 } from '../legal';
 import {LegalDocModal} from '../components/LegalDocModal';
-import {colors, font} from '../theme';
+import {makeStyles, radius} from '../theme';
 
 interface ConsentGateProps {
   onAgree: () => void;
@@ -18,6 +18,7 @@ interface ConsentGateProps {
  * Declining exits — nothing is collected or initialized before consent.
  */
 export function ConsentGate({onAgree}: ConsentGateProps) {
+  const styles = useStyles();
   const [openDoc, setOpenDoc] = useState<LegalDoc | null>(null);
 
   const decline = () => {
@@ -26,11 +27,11 @@ export function ConsentGate({onAgree}: ConsentGateProps) {
 
   return (
     <View style={styles.root}>
-      <Text style={styles.logo}>Z_</Text>
-      <Text style={styles.title}>欢迎使用 ZShell</Text>
+      <Text style={styles.logo}>K_</Text>
+      <Text style={styles.title}>欢迎使用 KShell</Text>
       <Text style={styles.intro}>
-        ZShell 是非官方开源的远程控制手机客户端，兼容 ZCode、Kimi Code 与
-        DSH 桌面端。开始使用前，请阅读并同意：
+        KShell 是非官方开源的远程控制手机客户端，兼容 Kimi Code
+        桌面端。开始使用前，请阅读并同意：
       </Text>
       <TouchableOpacity onPress={() => setOpenDoc(USER_AGREEMENT)}>
         <Text style={styles.link}>《用户协议与免责声明》</Text>
@@ -52,7 +53,7 @@ export function ConsentGate({onAgree}: ConsentGateProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, font) => ({
   root: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -61,25 +62,25 @@ const styles = StyleSheet.create({
     padding: 32,
     gap: 10,
   },
-  logo: {fontSize: 44, fontWeight: '700', color: '#eeeeee', marginBottom: 4},
+  logo: {fontSize: 44, fontWeight: '700', color: colors.accent, marginBottom: 4},
   title: {...font.title},
   intro: {...font.dim, textAlign: 'center', marginTop: 8},
   link: {color: colors.accent, fontSize: 15, paddingVertical: 6},
   promise: {...font.faint, textAlign: 'center', marginTop: 12, marginBottom: 16},
   agreeButton: {
     backgroundColor: colors.accent,
-    borderRadius: 12,
+    borderRadius: radius.m,
     paddingVertical: 14,
     paddingHorizontal: 48,
     width: '100%',
     alignItems: 'center',
   },
-  agreeButtonText: {color: '#fff', fontSize: 16, fontWeight: '600'},
+  agreeButtonText: {color: colors.onAccent, fontSize: 16, fontWeight: '600'},
   declineButton: {
-    borderRadius: 12,
+    borderRadius: radius.m,
     paddingVertical: 12,
     width: '100%',
     alignItems: 'center',
   },
   declineButtonText: {color: colors.textFaint, fontSize: 14},
-});
+}));

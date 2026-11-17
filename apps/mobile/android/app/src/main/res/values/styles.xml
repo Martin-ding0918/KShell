@@ -2,9 +2,10 @@
 
     <!-- Base application theme. -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <!-- Dark window background: with edge-to-edge inset padding the window
-             background shows through the status/nav bar areas — keep it the
-             app's dark color instead of the default white. -->
+        <!-- Window background follows the day/night scheme (values-night):
+             with edge-to-edge inset padding it shows through the status/nav
+             bar areas, so it must match the app's background color. Bar icon
+             contrast is set at runtime in MainActivity.applySystemBars. -->
         <item name="android:windowBackground">@color/app_background</item>
         <item name="android:statusBarColor">@color/app_background</item>
         <item name="android:navigationBarColor">@color/app_background</item>

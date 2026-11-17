@@ -13,6 +13,26 @@ function fakeRegistry(): {reg: MachineRegistry; now: () => number; t: {v: number
 }
 
 describe('MachineRegistry', () => {
+  it('loads and restores only supported hosts without losing saved Kimi state', () => {
+    const {reg} = fakeRegistry();
+    reg.addFromUrl(QR_A);
+    reg.addFromUrl('http://192.168.1.5:35421/');
+    const kimiUrl = 'https://code-rc.kimi.com/devices/fixture-device/';
+    const kimi = reg.addFromUrl(kimiUrl);
+    if (!kimi.ok) throw new Error('Kimi fixture is invalid');
+    reg.setLoginState(kimi.record.id, 'logged-in');
+    const acceptsCredentials = (c: {kind?: string}) => c.kind === 'kimi';
+    const data = reg.toJSON();
+    const filtered = MachineRegistry.fromJSON(JSON.stringify(data), {acceptsCredentials})!;
+    expect(filtered.sorted()).toHaveLength(1);
+    expect(filtered.get(kimi.record.id)?.loginState).toBe('logged-in');
+    expect(filtered.addFromUrl(QR_A)).toEqual({ok: false, reason: 'unsupported-host'});
+    expect(filtered.addFromUrl('http://192.168.1.5:35421/')).toEqual({ok: false, reason: 'unsupported-host'});
+    const restored = new MachineRegistry(null, {acceptsCredentials});
+    expect(restored.importMachines(data.machines)).toEqual({added: 1, updated: 0});
+    expect(restored.sorted()[0].credentials.kind).toBe('kimi');
+  });
+
   it('adds from a QR URL and defaults the name from the device name', () => {
     const {reg} = fakeRegistry();
     const r = reg.addFromUrl(QR_A);

@@ -20,6 +20,12 @@ const mmkv = new MMKVLoader()
   .withEncryption()
   .initialize();
 
+const registryOptions: ConstructorParameters<typeof MachineRegistry>[1] = {
+  acceptsCredentials: credentials =>
+    credentials?.kind === 'kimi' &&
+    /^https:\/\/code-rc\.kimi\.(com|ai)$/.test(credentials.origin),
+};
+
 export const secureStore: SecureKvStore = {
   getString: (key: string): string | null =>
     (mmkv.getString(key) as string | null) ?? null,
@@ -33,8 +39,8 @@ export const secureStore: SecureKvStore = {
 
 export function loadRegistry(): MachineRegistry {
   return (
-    MachineRegistry.fromJSON(secureStore.getString(STORAGE_KEYS.machines)) ??
-    new MachineRegistry()
+    MachineRegistry.fromJSON(secureStore.getString(STORAGE_KEYS.machines), registryOptions) ??
+    new MachineRegistry(null, registryOptions)
   );
 }
 

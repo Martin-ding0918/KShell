@@ -46,10 +46,10 @@ import {
   startUpdateDownload,
   clearWebSession,
 } from '../downloads';
-import {fetchLatestRelease, PROJECT_PAGE} from '../updater';
+import {fetchLatestRelease, IS_FORK_BUILD, PROJECT_PAGE} from '../updater';
 import type {UpdateChannel} from '../notifications';
 import {biometricLabel} from './LockScreen';
-import {colors, font} from '../theme';
+import {makeStyles, radius, ThemeMode, useTheme} from '../theme';
 import {APP_VERSION} from '../version';
 
 /** Salt RNG backed by the native SecureRandom (JS Math.random is predictable). */
@@ -80,7 +80,15 @@ interface SettingsScreenProps {
   onOpenDownloads: () => void;
   onOpenDataManage: () => void;
   onOpenDiagnostics: () => void;
+  themeMode: ThemeMode;
+  onChangeThemeMode: (mode: ThemeMode) => void;
 }
+
+const THEME_OPTIONS: Array<{mode: ThemeMode; label: string}> = [
+  {mode: 'system', label: '跟随系统'},
+  {mode: 'light', label: '浅色'},
+  {mode: 'dark', label: '深色'},
+];
 
 type Step =
   | {kind: 'idle'}
@@ -110,7 +118,15 @@ export function SettingsScreen({
   onOpenDownloads,
   onOpenDataManage,
   onOpenDiagnostics,
+  themeMode,
+  onChangeThemeMode,
 }: SettingsScreenProps) {
+  const {colors, font} = useTheme();
+  const styles = useStyles();
+  const switchColors = {
+    trackColor: {false: colors.switchTrackOff, true: colors.accent},
+    thumbColor: colors.switchThumb,
+  };
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricType, setBiometricType] = useState<string | undefined>();
   const [step, setStep] = useState<Step>({kind: 'idle'});
@@ -302,7 +318,7 @@ export function SettingsScreen({
       return;
     }
     if (parsed.format !== 'zshell-machines' || !Array.isArray(parsed.machines)) {
-      setError('这不是 ZShell 的配对备份');
+      setError('这不是有效的配对备份');
       return;
     }
     const r = onImportMachines(parsed.machines);
@@ -400,6 +416,34 @@ export function SettingsScreen({
       </TouchableOpacity>
       <Text style={styles.pageTitle}>设置</Text>
 
+      {/* ================= 外观 ================= */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>外观</Text>
+        <View style={styles.segment} accessibilityRole="radiogroup">
+          {THEME_OPTIONS.map(opt => {
+            const active = themeMode === opt.mode;
+            return (
+              <TouchableOpacity
+                key={opt.mode}
+                style={[styles.segmentItem, active && styles.segmentItemActive]}
+                accessibilityRole="radio"
+                accessibilityState={{selected: active}}
+                onPress={() => onChangeThemeMode(opt.mode)}>
+                <Text
+                  style={[styles.segmentText, active && styles.segmentTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={font.faint}>
+          {themeMode === 'system'
+            ? '随安卓系统的深色模式自动切换'
+            : '已固定外观，不随系统切换'}
+        </Text>
+      </View>
+
       {/* ================= 应用锁 ================= */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>应用锁</Text>
@@ -439,8 +483,7 @@ export function SettingsScreen({
                 setError('验证未通过，未开启生物识别');
               }
             }}
-            trackColor={{true: colors.accent}}
-            thumbColor="#ffffff"
+            {...switchColors}
           />
         </View>
         <View style={styles.divider} />
@@ -567,7 +610,7 @@ export function SettingsScreen({
               onSubmitEditing={submitPasswordSet}
             />
             <TouchableOpacity style={styles.primaryButton} onPress={submitPasswordSet}>
-              <Text style={{color: '#fff', fontWeight: '600'}}>下一步</Text>
+              <Text style={styles.primaryButtonText}>下一步</Text>
             </TouchableOpacity>
             {error != null ? <Text style={styles.errorText}>{error}</Text> : null}
           </View>
@@ -588,7 +631,7 @@ export function SettingsScreen({
                     setError('验证未通过');
                   }
                 }}>
-                <Text style={{color: '#fff', fontWeight: '600'}}>
+                <Text style={styles.primaryButtonText}>
                   使用{biometricLabel(biometricType)}
                 </Text>
               </TouchableOpacity>
@@ -616,7 +659,7 @@ export function SettingsScreen({
                 <TouchableOpacity
                   style={styles.primaryButton}
                   onPress={() => verifyBySecret('password', password, step.action)}>
-                  <Text style={{color: '#fff', fontWeight: '600'}}>验证</Text>
+                  <Text style={styles.primaryButtonText}>验证</Text>
                 </TouchableOpacity>
               </>
             ) : null}
@@ -644,8 +687,7 @@ export function SettingsScreen({
               privacyWindow?.setRecentsMaskEnabled(on);
               setRecentsMask(on);
             }}
-            trackColor={{true: colors.accent}}
-            thumbColor="#ffffff"
+            {...switchColors}
           />
         </View>
       </View>
@@ -702,7 +744,7 @@ export function SettingsScreen({
               onChangeText={setBackupPass2}
             />
             <TouchableOpacity style={styles.primaryButton} onPress={doExportBackup}>
-              <Text style={{color: '#fff', fontWeight: '600'}}>生成备份</Text>
+              <Text style={styles.primaryButtonText}>生成备份</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={{alignItems: 'center'}}
@@ -733,7 +775,7 @@ export function SettingsScreen({
               onChangeText={setRestorePass}
             />
             <TouchableOpacity style={styles.primaryButton} onPress={doRestoreBackup}>
-              <Text style={{color: '#fff', fontWeight: '600'}}>恢复</Text>
+              <Text style={styles.primaryButtonText}>恢复</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={{alignItems: 'center'}}
@@ -759,7 +801,7 @@ export function SettingsScreen({
       <View style={styles.card}>
         <Text style={styles.cardTitle}>网页登录状态</Text>
         <Text style={font.faint}>
-          控制台网页的登录数据保存在应用内：Kimi 机器共用 Kimi 账号登录，ZCode 机器共用 ZCode 账号登录
+          控制台网页的登录数据保存在应用内：Kimi 机器共用 Kimi 账号登录
         </Text>
         <View style={styles.row}>
           <View style={styles.rowMain}>
@@ -777,13 +819,12 @@ export function SettingsScreen({
                 clearWebSession().catch(() => {});
               }
             }}
-            trackColor={{true: colors.accent}}
-            thumbColor="#ffffff"
+            {...switchColors}
           />
         </View>
         <View style={styles.divider} />
         <TouchableOpacity
-          style={[styles.rowButton, webClearArm && {backgroundColor: 'rgba(229,83,75,0.2)'}]}
+          style={[styles.rowButton, webClearArm && styles.rowButtonArmed]}
           onPress={async () => {
             if (!webClearArm) {
               setWebClearArm(true);
@@ -812,11 +853,12 @@ export function SettingsScreen({
         <View style={styles.row}>
           <View style={styles.rowMain}>
             <Text style={font.body}>当前版本 v{APP_VERSION}</Text>
-            <Text style={font.faint}>从 GitHub Releases 检查新版本</Text>
+            <Text style={font.faint}>{IS_FORK_BUILD ? 'Fork 版本不使用上游更新' : '从 GitHub Releases 检查新版本'}</Text>
           </View>
           <TouchableOpacity
             style={styles.rowButton}
             disabled={
+              IS_FORK_BUILD ||
               update.kind === 'checking' ||
               update.kind === 'downloading' ||
               update.kind === 'downloadPaused'
@@ -834,14 +876,14 @@ export function SettingsScreen({
             <Text style={font.faint}>发现新版本时本地通知提醒（不自动安装）</Text>
           </View>
           <Switch
-            value={prefs.autoCheckUpdates}
+            disabled={IS_FORK_BUILD}
+            value={!IS_FORK_BUILD && prefs.autoCheckUpdates}
             onValueChange={on => {
               const next = {...prefs, autoCheckUpdates: on};
               setPrefs(next);
               savePrefs(next);
             }}
-            trackColor={{true: colors.accent}}
-            thumbColor="#ffffff"
+            {...switchColors}
           />
         </View>
 
@@ -857,10 +899,7 @@ export function SettingsScreen({
               return (
                 <TouchableOpacity
                   key={ch}
-                  style={[
-                    styles.rowButton,
-                    active && {borderWidth: 1, borderColor: colors.accent},
-                  ]}
+                  style={[styles.rowButton, active && styles.rowButtonActive]}
                   onPress={() => {
                     const next = {...prefs, updateChannel: ch};
                     setPrefs(next);
@@ -995,7 +1034,7 @@ export function SettingsScreen({
                       );
                     });
                   }}>
-                  <Text style={{color: '#fff', fontWeight: '600'}}>打开安装包</Text>
+                  <Text style={styles.primaryButtonText}>打开安装包</Text>
                 </TouchableOpacity>
                 {openApkError != null ? (
                   <Text style={styles.errorText}>{openApkError}</Text>
@@ -1006,7 +1045,7 @@ export function SettingsScreen({
               <TouchableOpacity
                 style={styles.primaryButton}
                 onPress={() => startDownload(update.release)}>
-                <Text style={{color: '#fff', fontWeight: '600'}}>
+                <Text style={styles.primaryButtonText}>
                   下载并安装
                 </Text>
               </TouchableOpacity>
@@ -1103,7 +1142,7 @@ export function SettingsScreen({
           <Text style={{color: colors.textFaint, fontSize: 18}}>›</Text>
         </TouchableOpacity>
         <Text style={[font.faint, {marginTop: 8, textAlign: 'center'}]}>
-          ZShell · 非官方第三方客户端 · 零数据收集
+          KShell · 非官方第三方客户端 · 零数据收集
         </Text>
       </View>
 
@@ -1180,29 +1219,54 @@ export function SettingsScreen({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, font) => ({
   root: {flex: 1, backgroundColor: colors.bg},
   pageTitle: {...font.title, marginBottom: 2},
   card: {
     backgroundColor: colors.bgElevated,
-    borderRadius: 14,
+    borderRadius: radius.l,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     padding: 16,
     gap: 8,
   },
   cardTitle: {
     color: colors.textFaint,
     fontSize: 12,
+    fontWeight: '600',
     letterSpacing: 1,
     marginBottom: 2,
   },
+  segment: {
+    flexDirection: 'row',
+    backgroundColor: colors.bgInput,
+    borderRadius: 10,
+    padding: 3,
+  },
+  segmentItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  segmentItemActive: {
+    backgroundColor: colors.bgElevated,
+    elevation: 1,
+  },
+  segmentText: {color: colors.textDim, fontSize: 14},
+  segmentTextActive: {color: colors.accent, fontWeight: '600'},
   row: {flexDirection: 'row', alignItems: 'center', gap: 10},
   rowMain: {flex: 1, gap: 2},
   rowButton: {
     backgroundColor: colors.bgInput,
-    borderRadius: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'transparent',
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  rowButtonActive: {borderColor: colors.accent, backgroundColor: colors.accentSoft},
+  rowButtonArmed: {backgroundColor: colors.dangerArmed},
   rowButtonText: {color: colors.textDim, fontSize: 13},
   divider: {
     height: StyleSheet.hairlineWidth,
@@ -1213,6 +1277,8 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: colors.bgInput,
     borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: colors.text,
@@ -1220,10 +1286,11 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     backgroundColor: colors.accent,
-    borderRadius: 10,
+    borderRadius: radius.m,
     paddingVertical: 13,
     alignItems: 'center',
   },
+  primaryButtonText: {color: colors.onAccent, fontWeight: '600'},
   track: {
     height: 4,
     borderRadius: 2,
@@ -1260,4 +1327,4 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-});
+}));

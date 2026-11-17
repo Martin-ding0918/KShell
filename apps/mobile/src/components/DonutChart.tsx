@@ -1,6 +1,6 @@
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
-import {colors, font} from '../theme';
+import {makeStyles, useTheme} from '../theme';
 
 export interface DonutSegment {
   key: string;
@@ -34,10 +34,13 @@ export function DonutChart({
   segments,
   size = 180,
   thickness = 18,
-  surface = colors.bgElevated,
+  surface,
   centerValue,
   centerLabel,
 }: DonutChartProps) {
+  const {colors} = useTheme();
+  const styles = useStyles();
+  const surfaceColor = surface ?? colors.bgElevated;
   const total = segments.reduce((sum, s) => sum + s.value, 0);
 
   // Decompose into ≤180° sectors with explicit start angles.
@@ -112,7 +115,7 @@ export function DonutChart({
         <React.Fragment key={`sector-${i}`}>
           {band(sector.start, sector.color)}
           {sector.start + sector.sweep < 359.99
-            ? band(sector.start + sector.sweep, surface)
+            ? band(sector.start + sector.sweep, surfaceColor)
             : null}
         </React.Fragment>
       ))}
@@ -124,7 +127,7 @@ export function DonutChart({
           width: hole,
           height: hole,
           borderRadius: hole / 2,
-          backgroundColor: surface,
+          backgroundColor: surfaceColor,
           alignItems: 'center',
           justifyContent: 'center',
         }}>
@@ -147,7 +150,7 @@ function halfStyle(size: number) {
   };
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, font) => ({
   centerValue: {...font.body, fontWeight: '600' as const, color: colors.text},
   centerLabel: {...font.faint, marginTop: 2},
-});
+}));

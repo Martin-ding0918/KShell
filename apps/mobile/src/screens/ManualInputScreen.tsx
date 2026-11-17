@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {colors, font} from '../theme';
+import {makeStyles, radius, useTheme} from '../theme';
 
 export interface ManualSubmitOutcome {
   ok: boolean;
@@ -25,12 +25,15 @@ interface ManualInputScreenProps {
 const REASON_TEXT: Record<string, string> = {
   empty: '请粘贴配对 URL',
   'invalid-url': '不是有效的 URL，请完整复制桌面端二维码对应的链接',
-  'not-https': 'ZCode / Kimi Code 仅支持 https；DSH 地址须为 http(s) 根地址',
-  'missing-sid': '无法识别：ZCode 缺少 sid、Kimi Code 需 /devices/… 路径、DSH 需根地址',
+  'not-https': 'Kimi Code 仅支持 HTTPS',
+  'missing-sid': '无法识别：Kimi Code 需 /devices/… 路径',
+  'unsupported-host': '此版本仅支持 Kimi Code',
   'invalid-device-path': '不是有效的 Kimi Code 设备链接（/devices/…）',
 };
 
 export function ManualInputScreen({onSubmit, onDone}: ManualInputScreenProps) {
+  const {colors, font} = useTheme();
+  const styles = useStyles();
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -51,11 +54,11 @@ export function ManualInputScreen({onSubmit, onDone}: ManualInputScreenProps) {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={font.dim}>
           粘贴桌面端「远程控制」生成的配对链接（与二维码内容相同），
-          {'\n'}支持 ZCode、Kimi Code 与 DSH：
+          {'\n'}仅支持 Kimi Code：
         </Text>
         <TextInput
           style={styles.urlInput}
-          placeholder={'https://zcode.z.ai/remote/v4?sid=…\n或 https://code-rc.kimi.com/devices/<设备ID>/\n或 http://192.168.1.5:3080（DSH）'}
+          placeholder={'https://code-rc.kimi.com/devices/<设备ID>/'}
           placeholderTextColor={colors.textFaint}
           value={url}
           onChangeText={setUrl}
@@ -80,9 +83,7 @@ export function ManualInputScreen({onSubmit, onDone}: ManualInputScreenProps) {
           <Text style={styles.buttonText}>保存并连接</Text>
         </TouchableOpacity>
         <Text style={[font.faint, {marginTop: 16}]}>
-          ZCode 格式：https://&lt;origin&gt;/remote/v4?sid=…（新版无需 hash，旧版链接同样可导入）{'\n'}
           Kimi Code 格式：https://code-rc.kimi.com/devices/&lt;设备ID&gt;/{'\n'}
-          DSH 格式：http://&lt;局域网IP&gt;:&lt;端口&gt; 或自建隧道域名（远程插件设置页的二维码链接）{'\n'}
           （桌面端二维码弹窗均可复制链接）
         </Text>
       </ScrollView>
@@ -90,12 +91,14 @@ export function ManualInputScreen({onSubmit, onDone}: ManualInputScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(colors => ({
   root: {flex: 1, backgroundColor: colors.bg},
   content: {padding: 20, gap: 12},
   urlInput: {
     backgroundColor: colors.bgInput,
-    borderRadius: 10,
+    borderRadius: radius.m,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: colors.text,
@@ -105,7 +108,9 @@ const styles = StyleSheet.create({
   },
   nameInput: {
     backgroundColor: colors.bgInput,
-    borderRadius: 10,
+    borderRadius: radius.m,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: colors.text,
@@ -114,11 +119,11 @@ const styles = StyleSheet.create({
   error: {color: colors.danger, fontSize: 13},
   button: {
     backgroundColor: colors.accent,
-    borderRadius: 10,
+    borderRadius: radius.m,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 4,
   },
   buttonDisabled: {backgroundColor: colors.accentDim},
-  buttonText: {color: '#fff', fontSize: 16, fontWeight: '600'},
-});
+  buttonText: {color: colors.onAccent, fontSize: 16, fontWeight: '600'},
+}));

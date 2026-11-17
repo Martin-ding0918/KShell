@@ -14,7 +14,7 @@ import {
   relativeTime,
   sourceShortLabel,
 } from '@zshell/core-shell';
-import {colors, font, radius} from '../theme';
+import {makeStyles, Palette, radius, useTheme} from '../theme';
 
 interface MachineListScreenProps {
   machines: MachineRecord[];
@@ -32,13 +32,6 @@ interface MachineListScreenProps {
    * shared by every Kimi machine, so this affects all of them at once.
    */
   onSignOutWebLogin: () => void;
-  /** DSH: accept / revoke the machine's untrusted TLS certificate. */
-  onSetTrustSsl: (id: string, trust: boolean) => void;
-  /**
-   * DSH: store / clear the HTTP Basic credential for a reverse-proxied
-   * origin. Empty username clears.
-   */
-  onSetBasicAuth: (id: string, username: string, password: string) => void;
 }
 
 function hostOf(record: MachineRecord): string {
@@ -54,12 +47,10 @@ type Row =
   | {type: 'sub'; favorite: boolean}
   | {type: 'machine'; m: MachineRecord};
 
-/** Group by host product (ZCode / Kimi Code / DSH), favorites-first inside each. */
+/** Show Kimi devices, with favorites first. */
 function buildRows(machines: MachineRecord[]): Row[] {
   const groups: Array<[string, MachineRecord[]]> = [
-    ['ZCode', machines.filter(m => hostKindOf(m.credentials) === 'zcode')],
     ['Kimi Code', machines.filter(m => hostKindOf(m.credentials) === 'kimi')],
-    ['DSH', machines.filter(m => hostKindOf(m.credentials) === 'dsh')],
   ];
   const rows: Row[] = [];
   for (const [label, group] of groups) {
@@ -81,7 +72,10 @@ function buildRows(machines: MachineRecord[]): Row[] {
 }
 
 /** Login pill for the card corner: text-first, color as support. */
-function loginPillOf(m: MachineRecord): {label: string; color: string; bg: string} {
+function loginPillOf(
+  m: MachineRecord,
+  colors: Palette,
+): {label: string; color: string; bg: string} {
   if (hostKindOf(m.credentials) === 'kimi') {
     switch (m.loginState) {
       case 'logged-in':
@@ -107,20 +101,24 @@ function machineMeta(m: MachineRecord, now: number): string {
 
 export function MachineListScreen(props: MachineListScreenProps) {
   const {machines} = props;
+  const {colors, font} = useTheme();
+  const styles = useStyles();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [deleteArmId, setDeleteArmId] = useState<string | null>(null);
   const [signOutArm, setSignOutArm] = useState(false);
-  const [basicUser, setBasicUser] = useState('');
-  const [basicPass, setBasicPass] = useState('');
   const rows = buildRows(machines);
 
   return (
     <View style={styles.root}>
       <View style={styles.header}>
         <Text style={font.title}>我的机器</Text>
-        <TouchableOpacity onPress={props.onSettings} style={styles.settingsButton}>
-          <Text style={{color: colors.textDim, fontSize: 20}}>⚙</Text>
+        <TouchableOpacity
+          onPress={props.onSettings}
+          style={styles.settingsButton}
+          accessibilityLabel="设置"
+          accessibilityRole="button">
+          <Text style={styles.settingsGlyph}>⚙</Text>
         </TouchableOpacity>
       </View>
 
@@ -131,8 +129,7 @@ export function MachineListScreen(props: MachineListScreenProps) {
           </View>
           <Text style={font.body}>还没有配对的桌面端</Text>
           <Text style={[font.faint, {marginTop: 8, textAlign: 'center'}]}>
-            先在 ZCode / Kimi Code 桌面端打开「远程控制」，{'\n'}
-            或在 DSH 桌面端开启远程插件，{'\n'}
+            先在 Kimi Code 桌面端打开「远程控制」，{'\n'}
             用下方扫码；或者直接粘贴配对链接。
           </Text>
         </ScrollView>
@@ -165,7 +162,7 @@ export function MachineListScreen(props: MachineListScreenProps) {
             }
             const item = row.m;
             const expanded = expandedId === item.id;
-            const pill = loginPillOf(item);
+            const pill = loginPillOf(item, colors);
             const meta = machineMeta(item, Date.now());
             return (
               <View>
@@ -178,8 +175,6 @@ export function MachineListScreen(props: MachineListScreenProps) {
                     setRenameValue(item.name);
                     setDeleteArmId(null);
                     setSignOutArm(false);
-                    setBasicUser(item.basicAuth?.username ?? '');
-                    setBasicPass('');
                   }}>
                   <View style={styles.cardRow}>
                     <TouchableOpacity
@@ -227,9 +222,7 @@ export function MachineListScreen(props: MachineListScreenProps) {
                       </TouchableOpacity>
                     </View>
                     <Text style={[font.faint, {marginTop: 2}]}>
-                      {hostKindOf(item.credentials) === 'dsh'
-                        ? `地址 ${hostOf(item)}`
-                        : `sid …${item.credentials.sid.slice(-6)}`}
+                      {`sid …${item.credentials.sid.slice(-6)}`}
                     </Text>
                     <View style={styles.actionRow}>
                       <TouchableOpacity
@@ -268,78 +261,6 @@ export function MachineListScreen(props: MachineListScreenProps) {
                         </Text>
                       </TouchableOpacity>
                     </View>
-                    {hostKindOf(item.credentials) === 'dsh' ? (
-                      <View style={styles.dshBox}>
-                        <View style={styles.signOutRow}>
-                          <Text style={[font.faint, {flex: 1}]}>
-                            {item.trustSelfSigned === true
-                              ? '证书信任：已信任（连接该地址跳过证书校验）'
-                              : '证书信任：未信任（自签名地址首次连接时询问）'}
-                          </Text>
-                          {item.trustSelfSigned === true ? (
-                            <TouchableOpacity
-                              style={styles.smallButton}
-                              onPress={() => props.onSetTrustSsl(item.id, false)}>
-                              <Text style={[styles.smallButtonText, {color: colors.danger}]}>
-                                撤销信任
-                              </Text>
-                            </TouchableOpacity>
-                          ) : null}
-                        </View>
-                        <Text style={[font.faint, {marginTop: 4}]}>
-                          访问口令（HTTP Basic，反向代理保护时填写；加密存储）
-                        </Text>
-                        <View style={styles.renameRow}>
-                          <TextInput
-                            style={styles.renameInput}
-                            value={basicUser}
-                            onChangeText={setBasicUser}
-                            placeholder="用户名"
-                            placeholderTextColor={colors.textFaint}
-                            autoCapitalize="none"
-                            autoCorrect={false}
-                          />
-                          <TextInput
-                            style={styles.renameInput}
-                            value={basicPass}
-                            onChangeText={setBasicPass}
-                            placeholder={item.basicAuth != null ? '密码（已保存，留空不改）' : '密码'}
-                            placeholderTextColor={colors.textFaint}
-                            secureTextEntry
-                            autoCapitalize="none"
-                            autoCorrect={false}
-                          />
-                        </View>
-                        <View style={styles.actionRow}>
-                          <TouchableOpacity
-                            style={styles.smallButton}
-                            onPress={() => {
-                              // 密码留空且已有口令：沿用旧密码（仅改用户名的场景）
-                              const pass =
-                                basicPass.length > 0
-                                  ? basicPass
-                                  : (item.basicAuth?.password ?? '');
-                              props.onSetBasicAuth(item.id, basicUser.trim(), pass);
-                              setBasicPass('');
-                            }}>
-                            <Text style={styles.smallButtonText}>保存口令</Text>
-                          </TouchableOpacity>
-                          {item.basicAuth != null ? (
-                            <TouchableOpacity
-                              style={styles.smallButton}
-                              onPress={() => {
-                                props.onSetBasicAuth(item.id, '', '');
-                                setBasicUser('');
-                                setBasicPass('');
-                              }}>
-                              <Text style={[styles.smallButtonText, {color: colors.danger}]}>
-                                清除口令
-                              </Text>
-                            </TouchableOpacity>
-                          ) : null}
-                        </View>
-                      </View>
-                    ) : null}
                     {hostKindOf(item.credentials) === 'kimi' ? (
                       <View style={styles.signOutRow}>
                         <Text style={[font.faint, {flex: 1}]}>
@@ -378,14 +299,14 @@ export function MachineListScreen(props: MachineListScreenProps) {
           <Text style={styles.primaryButtonText}>扫码配对</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.secondaryButton} onPress={props.onManual}>
-          <Text style={{color: colors.accent, fontSize: 15}}>手动输入链接</Text>
+          <Text style={styles.secondaryButtonText}>手动输入链接</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, font) => ({
   root: {flex: 1, backgroundColor: colors.bg},
   header: {
     flexDirection: 'row',
@@ -395,7 +316,17 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 8,
   },
-  settingsButton: {padding: 8},
+  settingsButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgElevated,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  settingsGlyph: {color: colors.textDim, fontSize: 18},
   empty: {flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40, gap: 6},
   emptyBadge: {
     width: 104,
@@ -445,7 +376,7 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   actions: {
-    backgroundColor: '#1c1c1c',
+    backgroundColor: colors.bgSunken,
     borderRadius: radius.m,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
@@ -458,7 +389,7 @@ const styles = StyleSheet.create({
   renameInput: {
     flex: 1,
     backgroundColor: colors.bgInput,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
     color: colors.text,
@@ -466,14 +397,13 @@ const styles = StyleSheet.create({
   },
   actionRow: {flexDirection: 'row', gap: 8, flexWrap: 'wrap'},
   signOutRow: {flexDirection: 'row', gap: 10, alignItems: 'center'},
-  dshBox: {gap: 8},
   smallButton: {
     backgroundColor: colors.bgInput,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  dangerButton: {backgroundColor: 'rgba(229,83,75,0.2)'},
+  dangerButton: {backgroundColor: colors.dangerArmed},
   smallButtonText: {color: colors.textDim, fontSize: 13},
   bottomBar: {
     position: 'absolute',
@@ -483,8 +413,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     padding: 16,
-    paddingBottom: 28,
-    backgroundColor: 'rgba(22,22,22,0.94)',
+    paddingBottom: 24,
+    backgroundColor: colors.bgBar,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
   primaryButton: {
     flex: 1,
@@ -493,7 +425,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
   },
-  primaryButtonText: {color: '#fff', fontSize: 16, fontWeight: '600'},
+  primaryButtonText: {color: colors.onAccent, fontSize: 16, fontWeight: '600'},
   secondaryButton: {
     borderWidth: 1,
     borderColor: colors.accent,
@@ -501,5 +433,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 18,
     alignItems: 'center',
+    backgroundColor: colors.accentSoft,
   },
-});
+  secondaryButtonText: {color: colors.accent, fontSize: 15, fontWeight: '500'},
+}));

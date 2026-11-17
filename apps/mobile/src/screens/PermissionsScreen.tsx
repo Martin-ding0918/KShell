@@ -14,7 +14,7 @@ import {
 import {parseClock} from '@zshell/core-shell';
 import {notifications, AppPrefs, loadPrefs, savePrefs} from '../notifications';
 import {biometricLabel} from './LockScreen';
-import {colors, font} from '../theme';
+import {makeStyles, radius, useTheme} from '../theme';
 
 interface PermissionsScreenProps {
   onBack: () => void;
@@ -26,6 +26,8 @@ interface PermissionsScreenProps {
  * own screen so the settings page stays short as permissions grow.
  */
 export function PermissionsScreen({onBack}: PermissionsScreenProps) {
+  const {colors, font} = useTheme();
+  const styles = useStyles();
   const [prefs, setPrefs] = useState<AppPrefs>(() => loadPrefs());
   // null = still checking, true/false = granted or not.
   const [camGranted, setCamGranted] = useState<boolean | null>(null);
@@ -105,8 +107,8 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
               setPrefs(next);
               savePrefs(next);
             }}
-            trackColor={{true: colors.accent}}
-            thumbColor="#ffffff"
+            trackColor={{false: colors.switchTrackOff, true: colors.accent}}
+            thumbColor={colors.switchThumb}
           />
         </View>
         <View style={styles.divider} />
@@ -155,8 +157,8 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
               setPrefs(next);
               savePrefs(next);
             }}
-            trackColor={{true: colors.accent}}
-            thumbColor="#ffffff"
+            trackColor={{false: colors.switchTrackOff, true: colors.accent}}
+            thumbColor={colors.switchThumb}
           />
         </View>
         {prefs.quietHours.enabled ? (
@@ -236,18 +238,21 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, font) => ({
   root: {flex: 1, backgroundColor: colors.bg},
   pageTitle: {...font.title, marginBottom: 2},
   card: {
     backgroundColor: colors.bgElevated,
-    borderRadius: 14,
+    borderRadius: radius.l,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     padding: 16,
     gap: 8,
   },
   cardTitle: {
     color: colors.textFaint,
     fontSize: 12,
+    fontWeight: '600',
     letterSpacing: 1,
     marginBottom: 2,
   },
@@ -255,7 +260,7 @@ const styles = StyleSheet.create({
   rowMain: {flex: 1, gap: 2},
   rowButton: {
     backgroundColor: colors.bgInput,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
@@ -275,4 +280,4 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
     marginVertical: 4,
   },
-});
+}));

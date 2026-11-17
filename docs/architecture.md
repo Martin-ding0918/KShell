@@ -67,8 +67,18 @@ App.tsx 用栈状态自管理导航（未引入 react-navigation，保持依赖�
 
 容器（卓易通）与 Android 15+ 会强制 edge-to-edge，且 `adjustResize` 随之失效。
 统一解法在 MainActivity：把系统栏 + 刘海 + IME 的 inset 全部转为根视图内边距
-（普通设备 insets 已被 decor 消费，天然无副作用），并把窗口背景设为应用深色，
-避免让出的区域露出默认白底。
+（普通设备 insets 已被 decor 消费，天然无副作用），并把窗口背景设为应用背景色
+（`values` / `values-night` 两套），避免让出的区域露出默认白底。
+
+### 6. 深色模式
+
+外观偏好（跟随系统 / 浅色 / 深色）存于原生 SharedPreferences，经
+`AppCompatDelegate.setDefaultNightMode` 生效：冷启动在 `MainApplication.onCreate`
+即应用，首帧窗口色就正确，系统对话框也随之切换。Manifest 声明了 `uiMode`
+配置变更，切换不重建 Activity（保活中的控制台不受影响），由
+`MainActivity.onConfigurationChanged` 重新取窗口 / 系统栏颜色与图标明暗。
+JS 侧 `ThemeProvider` 按偏好或 `useColorScheme()` 选调色板，样式用
+`makeStyles` 按方案缓存生成。
 
 ## 多平台路线
 

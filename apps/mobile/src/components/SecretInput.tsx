@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {colors} from '../theme';
+import {makeStyles, useTheme} from '../theme';
 
 interface SecretInputProps {
   value: string;
@@ -29,6 +29,8 @@ export function SecretInput({
   onSubmitEditing,
   autoFocus,
 }: SecretInputProps) {
+  const {colors} = useTheme();
+  const styles = useStyles();
   const [show, setShow] = useState(false);
   return (
     <View style={styles.row}>
@@ -59,10 +61,12 @@ export function SecretInput({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(colors => ({
   row: {
     backgroundColor: colors.bgInput,
     borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -75,4 +79,4 @@ const styles = StyleSheet.create({
   },
   toggle: {paddingHorizontal: 12, paddingVertical: 12},
   toggleText: {color: colors.accent, fontSize: 13},
-});
+}));

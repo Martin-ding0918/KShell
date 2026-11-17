@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import {DiagEvent} from '@zshell/core-shell';
 import {clearDiag, diag} from '../diagnostics';
-import {colors, font} from '../theme';
+import {makeStyles, radius, useTheme} from '../theme';
 
 /** Human labels for diagnostic event types (raw type shown when unmapped). */
 const LABELS: Record<string, string> = {
@@ -44,6 +44,8 @@ function timeText(t: number): string {
 /** Local-only connection timeline — the page to look at (and export) when
  * something feels off; nothing here ever leaves the device on its own. */
 export function DiagnosticsScreen({onBack}: {onBack: () => void}) {
+  const {colors, font} = useTheme();
+  const styles = useStyles();
   const [events, setEvents] = useState<DiagEvent[]>([]);
   const [copied, setCopied] = useState(false);
 
@@ -104,12 +106,14 @@ export function DiagnosticsScreen({onBack}: {onBack: () => void}) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, font) => ({
   root: {flex: 1, backgroundColor: colors.bg},
   pageTitle: {...font.title, marginBottom: 2},
   card: {
     backgroundColor: colors.bgElevated,
-    borderRadius: 14,
+    borderRadius: radius.l,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     padding: 14,
     gap: 8,
   },
@@ -119,10 +123,10 @@ const styles = StyleSheet.create({
   detail: {color: colors.textDim, fontSize: 12},
   button: {
     backgroundColor: colors.bgInput,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
   buttonText: {color: colors.textDim, fontSize: 13},
   buttonDanger: {color: colors.danger, fontSize: 13},
-});
+}));

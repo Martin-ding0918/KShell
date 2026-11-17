@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- App dark background (#161616), shared by theme + launcher layers. -->
-    <color name="app_background">#161616</color>
+    <!-- App window background, light scheme (theme.ts light.bg). The dark
+         variant lives in values-night; both must match theme.ts. -->
+    <color name="app_background">#F4F5F7</color>
 </resources>

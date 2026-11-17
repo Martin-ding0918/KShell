@@ -1,5 +1,5 @@
 /**
- * ZShell — remote-control mobile shell for ZCode / Kimi Code desktops.
+ * KShell — remote-control mobile shell for Kimi Code.
  * @format
  */
 
@@ -29,6 +29,14 @@ import {loadPrefs, notifications} from './src/notifications';
 import {cleanupInstalledApks, clearWebSession} from './src/downloads';
 import {fetchLatestRelease} from './src/updater';
 import {APP_VERSION} from './src/version';
+import {loadThemeMode, saveThemeMode, setConsoleBarColor} from './src/appearance';
+import {
+  makeStyles,
+  ThemeMode,
+  ThemeProvider,
+  useResolvedScheme,
+  useTheme,
+} from './src/theme';
 
 type Screen =
   | {name: 'list'}
@@ -42,6 +50,27 @@ type Screen =
   | {name: 'console'; machineId: string};
 
 function App(): React.JSX.Element {
+  const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode);
+  const scheme = useResolvedScheme(themeMode);
+  const changeThemeMode = useCallback((mode: ThemeMode) => {
+    setThemeMode(mode);
+    saveThemeMode(mode);
+  }, []);
+  return (
+    <ThemeProvider scheme={scheme}>
+      <AppContent themeMode={themeMode} onChangeThemeMode={changeThemeMode} />
+    </ThemeProvider>
+  );
+}
+
+interface AppContentProps {
+  themeMode: ThemeMode;
+  onChangeThemeMode: (mode: ThemeMode) => void;
+}
+
+function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.Element {
+  const {colors, isDark} = useTheme();
+  const styles = useStyles();
   const [booting, setBooting] = useState(true);
   const [consented, setConsented] = useState(true);
   const [lock, setLock] = useState(disabledConfig());
@@ -127,7 +156,7 @@ function App(): React.JSX.Element {
         if (!cancelled && release != null && isNewer(APP_VERSION, release)) {
           notifications.notify(
             5,
-            'ZShell 发现新版本',
+            'KShell 发现新版本',
             `v${release.version} 已发布，到 设置 → 更新 安装`,
           );
         }
@@ -201,8 +230,16 @@ function App(): React.JSX.Element {
     [persist],
   );
 
+  const consoleBarColor =
+    !booting && consented && unlocked && stack[stack.length - 1].name === 'console'
+      ? colors.consoleBg
+      : null;
+  useEffect(() => {
+    setConsoleBarColor(consoleBarColor);
+  }, [consoleBarColor]);
+
   if (booting) {
-    return <View style={{flex: 1, backgroundColor: '#161616'}} />;
+    return <View style={styles.boot} />;
   }
 
   // CN app-store compliance: agreement + privacy consent must come first.
@@ -296,6 +333,8 @@ function App(): React.JSX.Element {
           onOpenDownloads={() => push({name: 'downloads'})}
           onOpenDataManage={() => push({name: 'datamanage'})}
           onOpenDiagnostics={() => push({name: 'diagnostics'})}
+          themeMode={themeMode}
+          onChangeThemeMode={onChangeThemeMode}
         />
       );
       break;
@@ -339,14 +378,6 @@ function App(): React.JSX.Element {
             registryRef.current?.setMuted(id, muted);
             persist();
           }}
-          onSetTrustSsl={(id, trust) => {
-            registryRef.current?.setTrustSelfSigned(id, trust);
-            persist();
-          }}
-          onSetBasicAuth={(id, username, password) => {
-            registryRef.current?.setBasicAuth(id, username, password);
-            persist();
-          }}
           onDelete={id => {
             registryRef.current?.remove(id);
             persist();
@@ -381,14 +412,6 @@ function App(): React.JSX.Element {
             registryRef.current?.setMuted(id, muted);
             persist();
           }}
-          onSetTrustSsl={(id, trust) => {
-            registryRef.current?.setTrustSelfSigned(id, trust);
-            persist();
-          }}
-          onSetBasicAuth={(id, username, password) => {
-            registryRef.current?.setBasicAuth(id, username, password);
-            persist();
-          }}
           onDelete={id => {
             registryRef.current?.remove(id);
             persist();
@@ -411,7 +434,11 @@ function App(): React.JSX.Element {
 
   return (
     <>
-      <StatusBar barStyle="light-content" backgroundColor="#161616" />
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={consoleBarColor ?? colors.bg}
+        hidden={false}
+      />
       <View style={{flex: 1}}>
         {consoleSessions.map(id => {
           const m = sessionRecords[id];
@@ -427,6 +454,7 @@ function App(): React.JSX.Element {
               ]}>
               <ConsoleScreen
                 machine={m}
+                foreground={consoleBarColor != null && consoleOnTop === id}
                 onBack={pop}
                 registerBackHandler={
                   consoleOnTop === id ? registerConsoleBack : noopRegister
@@ -434,16 +462,6 @@ function App(): React.JSX.Element {
                 onOpenDownloads={() => push({name: 'downloads'})}
                 onLoginState={state => {
                   if (registryRef.current?.setLoginState(id, state)) {
-                    persist();
-                  }
-                }}
-                onSetTrustSsl={trust => {
-                  if (registryRef.current?.setTrustSelfSigned(id, trust)) {
-                    persist();
-                  }
-                }}
-                onSetBasicAuth={(username, password) => {
-                  if (registryRef.current?.setBasicAuth(id, username, password)) {
                     persist();
                   }
                 }}
@@ -477,24 +495,25 @@ function App(): React.JSX.Element {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(colors => ({
+  boot: {flex: 1, backgroundColor: colors.bg},
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#161616',
+    backgroundColor: colors.bg,
     elevation: 8,
   },
   sessionLayer: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#161616',
+    backgroundColor: colors.bg,
   },
   sessionHidden: {
     display: 'none',
   },
   gateOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#161616',
+    backgroundColor: colors.bg,
     elevation: 10,
   },
-});
+}));
 
 export default App;

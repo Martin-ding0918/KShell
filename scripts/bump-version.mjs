@@ -2,7 +2,7 @@
 // 发版版本号统一同步脚本（零依赖，只用 Node 内置模块）。
 //
 // 用法：
-//   node scripts/bump-version.mjs <x.y.z[-prerelease[.N]]> [versionCode]   显式指定版本
+//   node scripts/bump-version.mjs <x.y.z[-prerelease[.N]]|x.y.z.n> [versionCode]
 //   node scripts/bump-version.mjs pre [versionCode]                        预发布计数 +1
 //
 // 一次写入（发版检查单第 3 条，勿再手改）：
@@ -28,6 +28,7 @@ const PATHS = {
 // semver.org 官方正则去掉 build metadata 段（仓库版本号不使用 +build）
 const SEMVER_RE =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?$/;
+const FORK_VERSION_RE = /^((?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){2})\.(0|[1-9]\d*)$/;
 
 // package-lock 头部处理窗口：workspace 根条目的两个 version 都落在这个范围内，
 // 任何 node_modules 依赖条目都远在其后
@@ -39,7 +40,7 @@ const USAGE = [
   '  node scripts/bump-version.mjs pre [versionCode]        预发布计数 +1（0.1.0-beta.1 → 0.1.0-beta.2；',
   '                                                         当前无预发布后缀时升级为 <x.y.z>-alpha.1）',
   '',
-  '版本号须为合法 Semver，可含预发布段（alpha/beta/rc.N 等）。',
+  '支持 SemVer 或四段 fork 版本号（如 0.0.1.7）。',
   'versionCode 缺省为当前值 +1；显式指定时必须为大于当前值的整数。',
 ].join('\n');
 
@@ -93,12 +94,13 @@ function main() {
 
   let newVersion;
   if (argVersion === 'pre') {
-    newVersion = nextPreVersion(currentVersion);
-  } else if (SEMVER_RE.test(argVersion)) {
+    newVersion = nextPreVersion(currentVersion).replace(/^(\d+\.\d+\.\d+)-fork\.(\d+)$/, '$1.$2');
+  } else if (SEMVER_RE.test(argVersion) || FORK_VERSION_RE.test(argVersion)) {
     newVersion = argVersion;
   } else {
     die(`非法版本号：${argVersion}\n\n${USAGE}`);
   }
+  const npmVersion = newVersion.replace(FORK_VERSION_RE, '$1-fork.$2');
 
   const gradleText = read('gradle');
   const codeMatch = /^(\s*versionCode\s+)(\d+)/m.exec(gradleText);
@@ -130,10 +132,10 @@ function main() {
   } catch {
     drift.push('apps/mobile/package.json：解析失败');
   }
-  if (!nameMatch || nameMatch[2] !== currentVersion) {
+  if (!nameMatch || nameMatch[2].replace(FORK_VERSION_RE, '$1-fork.$2') !== currentVersion) {
     drift.push(`build.gradle versionName：${nameMatch ? nameMatch[2] : '未找到'}`);
   }
-  if (!tsMatch || tsMatch[1] !== currentVersion) {
+  if (!tsMatch || tsMatch[1].replace(FORK_VERSION_RE, '$1-fork.$2') !== currentVersion) {
     drift.push(`src/version.ts：${tsMatch ? tsMatch[1] : '未找到'}`);
   }
   if (drift.length > 0) {
@@ -143,8 +145,8 @@ function main() {
 
   // —— 校验全部通过，开始写入（package.json 的顶层 version 位于任何依赖块之前，
   //    首个 "version" 键即包自身版本）——
-  write('rootPkg', replaceFirst(rootPkgText, 'package.json', /"version":\s*"[^"]*"/, () => `"version": "${newVersion}"`));
-  write('mobilePkg', replaceFirst(mobilePkgText, 'apps/mobile/package.json', /"version":\s*"[^"]*"/, () => `"version": "${newVersion}"`));
+  write('rootPkg', replaceFirst(rootPkgText, 'package.json', /"version":\s*"[^"]*"/, () => `"version": "${npmVersion}"`));
+  write('mobilePkg', replaceFirst(mobilePkgText, 'apps/mobile/package.json', /"version":\s*"[^"]*"/, () => `"version": "${npmVersion}"`));
 
   let gradleOut = replaceFirst(
     gradleText,
@@ -172,7 +174,7 @@ function main() {
     let count = 0;
     const newHead = head.replace(/"version":\s*"[^"]*"/g, () => {
       count += 1;
-      return `"version": "${newVersion}"`;
+      return `"version": "${npmVersion}"`;
     });
     if (count > 0) {
       write('lock', newHead + raw.slice(LOCK_HEAD_LIMIT));

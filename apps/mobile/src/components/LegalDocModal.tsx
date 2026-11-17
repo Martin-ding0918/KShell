@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import {LegalDoc} from '../legal';
-import {colors, font} from '../theme';
+import {makeStyles, useTheme} from '../theme';
 
 interface LegalDocModalProps {
   doc: LegalDoc | null;
@@ -18,6 +18,8 @@ interface LegalDocModalProps {
 
 /** Full-screen modal viewer for legal documents (settings entries + consent gate). */
 export function LegalDocModal({doc, onClose}: LegalDocModalProps) {
+  const {colors, isDark} = useTheme();
+  const styles = useStyles();
   return (
     <Modal
       visible={doc != null}
@@ -25,7 +27,10 @@ export function LegalDocModal({doc, onClose}: LegalDocModalProps) {
       onRequestClose={onClose}
       statusBarTranslucent={false}>
       <View style={styles.root}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={colors.bg}
+        />
         <View style={styles.topBar}>
           <TouchableOpacity onPress={onClose} style={styles.backButton}>
             <Text style={styles.backText}>‹ 返回</Text>
@@ -43,7 +48,7 @@ export function LegalDocModal({doc, onClose}: LegalDocModalProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, font) => ({
   root: {flex: 1, backgroundColor: colors.bg},
   topBar: {
     height: 52,
@@ -59,4 +64,4 @@ const styles = StyleSheet.create({
   title: {...font.body, flex: 1, textAlign: 'center'},
   content: {padding: 20, paddingBottom: 40},
   body: {color: colors.textDim, fontSize: 14, lineHeight: 24},
-});
+}));

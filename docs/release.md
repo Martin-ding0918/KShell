@@ -1,5 +1,9 @@
 # 发版流程
 
+> KShell fork 的现行流程见 [接手记录](../README-STATUS.md)。KShell 使用四段版本号、
+> 本机正式签名和手动 GitHub Release；下方是上游 ZShell 的历史流程，
+> 不能用于当前 fork 发版。
+
 ## 版本规范
 
 - 语义化版本；预发布阶段用 `0.y.z-{alpha,beta,rc}.N`，正式版去掉后缀

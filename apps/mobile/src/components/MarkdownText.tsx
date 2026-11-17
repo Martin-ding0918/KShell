@@ -1,6 +1,6 @@
 import React, {useMemo} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
-import {colors} from '../theme';
+import {Text, View} from 'react-native';
+import {makeStyles} from '../theme';
 
 /**
  * Tiny renderer for the markdown subset our CHANGELOG uses: "## "/"### "
@@ -57,6 +57,7 @@ function parseBlocks(text: string): Block[] {
 }
 
 function Runs({runs}: {runs: Run[]}) {
+  const styles = useStyles();
   return (
     <>
       {runs.map((run, i) => (
@@ -71,6 +72,7 @@ function Runs({runs}: {runs: Run[]}) {
 }
 
 export function MarkdownText({text}: {text: string}) {
+  const styles = useStyles();
   const blocks = useMemo(() => parseBlocks(text), [text]);
   return (
     <View style={styles.container}>
@@ -109,7 +111,7 @@ export function MarkdownText({text}: {text: string}) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(colors => ({
   container: {gap: 8},
   h2: {color: colors.text, fontSize: 18, fontWeight: '700', marginTop: 6},
   h3: {color: colors.text, fontSize: 16, fontWeight: '600', marginTop: 10},
@@ -118,5 +120,10 @@ const styles = StyleSheet.create({
   li: {color: colors.textDim, fontSize: 14, lineHeight: 22, flex: 1},
   p: {color: colors.textDim, fontSize: 14, lineHeight: 22},
   bold: {fontWeight: '600', color: colors.text},
-  code: {color: colors.accent, fontSize: 13},
-});
+  code: {
+    color: colors.accent,
+    fontSize: 13,
+    fontFamily: 'monospace',
+    backgroundColor: colors.accentSoft,
+  },
+}));

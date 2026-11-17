@@ -1,6 +1,7 @@
 package com.zshell
 
 import android.app.Application
+import androidx.appcompat.app.AppCompatDelegate
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -23,6 +24,9 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // Apply the stored light/dark choice before any activity inflates.
+    AppCompatDelegate.setDefaultNightMode(
+        AppearanceModule.nightModeFor(AppearanceModule.storedMode(this)))
     loadReactNative(this)
   }
 }

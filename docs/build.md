@@ -19,6 +19,12 @@ cd apps/mobile/android && ./gradlew assembleRelease   # 发布包（JS 已内置
 cd apps/mobile && npm start                  # Metro（仅调试包需要）
 ```
 
+公开版签名：`assembleRelease` 必须提供 `ZS_STORE_FILE` 和 `ZS_STORE_PASSWORD`，
+默认别名为 `kshell`。通过本机环境变量 `ORG_GRADLE_PROJECT_ZS_STORE_FILE`、
+`ORG_GRADLE_PROJECT_ZS_STORE_PASSWORD` 传入，不把口令写进命令参数或仓库。
+没有正式密钥时构建会失败，不回退到调试签名。公开版包名为
+`io.github.martinding0918.kshell`，后续升级必须继续使用相同的密钥。
+
 模拟器调试（本机 MuMu 约定端口 16512）：
 
 ```bash
@@ -67,7 +73,8 @@ grep foojay node_modules/@react-native/gradle-plugin/settings.gradle.kts   # 应
 
 ## 代码规范速查
 
-- 主题 token 一律取自 `apps/mobile/src/theme.ts`
+- 主题 token 一律取自 `apps/mobile/src/theme.ts`：样式用 `makeStyles((colors, font) => ({…}))`
+  生成 hook，行内颜色用 `useTheme()`；浅 / 深两套调色板须同时补齐
 - 屏幕组件单文件置于 `src/screens/`；导航用 App.tsx 栈状态
 - core-shell 新增逻辑必须带 vitest 用例（含向量/边界）
 - 法律文本双源：仓库 `docs/*.md` 与 `src/legal.ts` 同步（见发版检查单）

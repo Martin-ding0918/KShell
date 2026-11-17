@@ -49,10 +49,11 @@ export interface MachineRegistryData {
 
 export type AddResult =
   | {ok: true; record: MachineRecord; updatedExisting: boolean}
-  | {ok: false; reason: ParseFailureReason};
+  | {ok: false; reason: ParseFailureReason | 'unsupported-host'};
 
 export interface MachineRegistryOptions {
   now?: () => number;
+  acceptsCredentials?: (credentials: PairingCredentials) => boolean;
 }
 
 /** Sanitized HTTP Basic credential from an imported record, or null. */
@@ -88,9 +89,13 @@ function defaultName(creds: PairingCredentials): string {  if (creds.kind === 'k
 export class MachineRegistry {
   private data: MachineRegistryData;
   private readonly now: () => number;
+  private readonly acceptsCredentials: NonNullable<MachineRegistryOptions['acceptsCredentials']>;
 
   constructor(data?: MachineRegistryData | null, opts: MachineRegistryOptions = {}) {
-    this.data = data ?? {version: 1, machines: [], nextSortOrder: 1, nextId: 1};
+    this.acceptsCredentials = opts.acceptsCredentials ?? (() => true);
+    this.data = data == null
+      ? {version: 1, machines: [], nextSortOrder: 1, nextId: 1}
+      : {...data, machines: data.machines.filter(m => this.acceptsCredentials(m.credentials))};
     this.now = opts.now ?? Date.now;
   }
 
@@ -103,16 +108,16 @@ export class MachineRegistry {
     };
   }
 
-  static fromJSON(raw: string | null): MachineRegistry | null {
+  static fromJSON(raw: string | null, opts?: MachineRegistryOptions): MachineRegistry | null {
     if (raw == null || raw.length === 0) {
-      return new MachineRegistry();
+      return new MachineRegistry(null, opts);
     }
     try {
       const parsed = JSON.parse(raw) as MachineRegistryData;
       if (parsed.version !== 1 || !Array.isArray(parsed.machines)) {
         return null;
       }
-      return new MachineRegistry(parsed);
+      return new MachineRegistry(parsed, opts);
     } catch {
       return null;
     }
@@ -129,6 +134,9 @@ export class MachineRegistry {
       return {ok: false, reason: parsed.reason};
     }
     const creds = parsed.credentials;
+    if (!this.acceptsCredentials(creds)) {
+      return {ok: false, reason: 'unsupported-host'};
+    }
     const existing = this.data.machines.find(
       m =>
         m.credentials.sid === creds.sid &&
@@ -287,7 +295,8 @@ export class MachineRegistry {
         (creds.kind !== undefined &&
           creds.kind !== 'zcode' &&
           creds.kind !== 'kimi' &&
-          creds.kind !== 'dsh')
+          creds.kind !== 'dsh') ||
+        !this.acceptsCredentials(creds)
       ) {
         continue;
       }

@@ -50,7 +50,10 @@ adb -s 127.0.0.1:16512 shell am start -n com.zshell/.MainActivity
 
 ## 代码风格
 
-- 主题 token 统一取自 `apps/mobile/src/theme.ts`，禁止散落硬编码色值
+- 主题 token 统一取自 `apps/mobile/src/theme.ts`，禁止散落硬编码色值；样式用
+  `makeStyles((colors, font) => ({…}))` 生成 hook（勿在模块级 `StyleSheet.create` 引用颜色，
+  否则无法随深色模式切换），行内颜色取 `useTheme()`；新增 token 时浅 / 深两套调色板同时补齐，
+  应用背景色另需同步 `android/app/src/main/res/values{,-night}/colors.xml`
 - 屏幕组件单文件置于 `src/screens/`；简单导航用 App.tsx 内栈状态，引入 react-navigation 前先讨论
 - 测试随代码同提交；`packages/*/test/*.test.ts` 由根 vitest 收集
 - 提交信息：中文、祈使句概述 + 空行 + 详情（参照 `git log`）

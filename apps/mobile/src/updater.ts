@@ -5,13 +5,16 @@ import {
   preferredAbiTags,
   ReleaseInfo,
 } from '@zshell/core-shell';
+import {APP_VERSION} from './version';
+
+export const IS_FORK_BUILD = /^\d+\.\d+\.\d+\.\d+$/.test(APP_VERSION);
 
 const RELEASES_LATEST =
   'https://api.github.com/repos/Amwidtf/zshell/releases/latest';
 const RELEASES_LIST =
   'https://api.github.com/repos/Amwidtf/zshell/releases?per_page=15';
 
-export const PROJECT_PAGE = 'https://github.com/Amwidtf/zshell';
+export const PROJECT_PAGE = 'https://github.com/Martin-ding0918/KShell-public';
 
 export type UpdateChannel = 'stable' | 'beta';
 
@@ -50,6 +53,7 @@ async function getJson(url: string): Promise<unknown | null> {
 export async function fetchLatestRelease(
   channel: UpdateChannel = 'stable',
 ): Promise<ReleaseInfo | null> {
+  if (IS_FORK_BUILD) return null;
   if (channel === 'beta') {
     return pickLatestRelease(await getJson(RELEASES_LIST), UPDATE_ABI_TAGS);
   }

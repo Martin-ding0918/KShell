@@ -17,12 +17,14 @@ import {
   resumeDownload,
   retryDownload,
 } from '../downloads';
-import {colors, font} from '../theme';
+import {makeStyles, radius, useTheme} from '../theme';
 
 /** Second-level page: every download this app uid owns — update APKs and
  * files downloaded from console pages — with live progress from the system
  * download manager. */
 export function DownloadsScreen({onBack}: {onBack: () => void}) {
+  const {colors, font} = useTheme();
+  const styles = useStyles();
   const [items, setItems] = useState<DownloadItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -193,12 +195,14 @@ export function DownloadsScreen({onBack}: {onBack: () => void}) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, font) => ({
   root: {flex: 1, backgroundColor: colors.bg},
   pageTitle: {...font.title, marginBottom: 2},
   card: {
     backgroundColor: colors.bgElevated,
-    borderRadius: 14,
+    borderRadius: radius.l,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     padding: 16,
     gap: 8,
   },
@@ -224,11 +228,11 @@ const styles = StyleSheet.create({
   actions: {flexDirection: 'row', gap: 10, marginTop: 2},
   button: {
     backgroundColor: colors.bgInput,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
   buttonText: {color: colors.textDim, fontSize: 13},
   buttonDanger: {color: colors.danger, fontSize: 13},
   errorText: {color: colors.danger, fontSize: 13},
-});
+}));

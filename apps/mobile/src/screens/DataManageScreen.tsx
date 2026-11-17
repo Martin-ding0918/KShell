@@ -11,7 +11,7 @@ import {DonutChart, DonutSegment} from '../components/DonutChart';
 import {cleanupInstalledApks, clearWebSession, queryDownloads, removeDownload} from '../downloads';
 import {clearDiag, diagSize} from '../diagnostics';
 import {secureStore} from '../storage';
-import {colors, font} from '../theme';
+import {makeStyles, radius, useTheme} from '../theme';
 
 interface DataManageScreenProps {
   machines: MachineRecord[];
@@ -36,6 +36,8 @@ interface Category {
  * stray tap can never lock the user out or orphan their machines.
  */
 export function DataManageScreen({machines, lock, onBack}: DataManageScreenProps) {
+  const {colors, font} = useTheme();
+  const styles = useStyles();
   const [categories, setCategories] = useState<Category[] | null>(null);
   const [downloadsBytes, setDownloadsBytes] = useState(0);
   // Two-tap armed clears, mirroring 网页登录状态 in settings.
@@ -101,7 +103,7 @@ export function DataManageScreen({machines, lock, onBack}: DataManageScreenProps
         desc: '更新安装包与控制台下载的文件',
       },
     ]);
-  }, [machines, lock]);
+  }, [machines, lock, colors]);
 
   useEffect(() => {
     refresh();
@@ -267,24 +269,27 @@ export function DataManageScreen({machines, lock, onBack}: DataManageScreenProps
       </View>
 
       <Text style={[font.faint, {textAlign: 'center', marginTop: 4}]}>
-        ZShell 零数据收集：以上数据全部只存在本机，不上传任何服务器
+        KShell 零数据收集：以上数据全部只存在本机，不上传任何服务器
       </Text>
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, font) => ({
   root: {flex: 1, backgroundColor: colors.bg},
   pageTitle: {...font.title, marginBottom: 2},
   card: {
     backgroundColor: colors.bgElevated,
-    borderRadius: 14,
+    borderRadius: radius.l,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     padding: 16,
     gap: 10,
   },
   cardTitle: {
     color: colors.textFaint,
     fontSize: 12,
+    fontWeight: '600',
     letterSpacing: 1,
     marginBottom: 2,
   },
@@ -294,11 +299,11 @@ const styles = StyleSheet.create({
   rowMain: {flex: 1, gap: 2},
   rowButton: {
     backgroundColor: colors.bgInput,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  rowButtonArmed: {backgroundColor: colors.dangerSoft},
+  rowButtonArmed: {backgroundColor: colors.dangerArmed},
   rowButtonText: {color: colors.textDim, fontSize: 13},
   divider: {
     height: StyleSheet.hairlineWidth,
@@ -307,4 +312,4 @@ const styles = StyleSheet.create({
   },
   errorText: {color: colors.danger, fontSize: 13},
   noteText: {color: colors.success, fontSize: 13},
-});
+}));

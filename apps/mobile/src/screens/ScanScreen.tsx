@@ -7,7 +7,7 @@ import {
   View,
 } from 'react-native';
 import {Camera} from 'react-native-camera-kit';
-import {colors, font} from '../theme';
+import {makeStyles, radius, useTheme} from '../theme';
 import {pickAndDecodeQr} from '../qrFromFile';
 
 export interface ScanOutcome {
@@ -25,8 +25,9 @@ interface ScanScreenProps {
 const REASON_TEXT: Record<string, string> = {
   empty: '内容为空',
   'invalid-url': '不是有效的 URL',
-  'not-https': 'ZCode / Kimi Code 仅支持 https；DSH 地址须为 http(s) 根地址',
-  'missing-sid': '不是配对二维码（ZCode 缺 sid / Kimi Code 需 /devices/… / DSH 需根地址）',
+  'not-https': 'Kimi Code 仅支持 HTTPS',
+  'missing-sid': '不是配对二维码（Kimi Code 需 /devices/…）',
+  'unsupported-host': '此版本仅支持 Kimi Code',
   'invalid-device-path': '不是有效的 Kimi Code 设备链接',
 };
 
@@ -34,6 +35,8 @@ export function ScanScreen({onResult, onDone}: ScanScreenProps) {
   const [permission, setPermission] = useState<'unknown' | 'granted' | 'denied'>(
     'unknown',
   );
+  const {font} = useTheme();
+  const styles = useStyles();
   const [status, setStatus] = useState<string | null>(null);
   const handling = useRef(false);
 
@@ -108,7 +111,7 @@ export function ScanScreen({onResult, onDone}: ScanScreenProps) {
           </View>
         ) : (
           <Text style={styles.tip}>
-            对准桌面端「远程控制」二维码（支持 ZCode / Kimi Code / DSH），{'\n'}
+            对准桌面端「远程控制」二维码（Kimi Code），{'\n'}
             或从相册选择二维码图片
           </Text>
         )}
@@ -120,9 +123,15 @@ export function ScanScreen({onResult, onDone}: ScanScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(colors => ({
   root: {flex: 1, backgroundColor: '#000'},
-  noCamera: {flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32},
+  noCamera: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+    backgroundColor: colors.bg,
+  },
   bottom: {
     position: 'absolute',
     left: 0,
@@ -136,16 +145,16 @@ const styles = StyleSheet.create({
   tip: {color: 'rgba(255,255,255,0.85)', fontSize: 13, textAlign: 'center'},
   statusBox: {
     backgroundColor: 'rgba(229,83,75,0.9)',
-    borderRadius: 8,
+    borderRadius: radius.m,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
   statusText: {color: '#fff', fontSize: 13},
   albumButton: {
     backgroundColor: colors.accent,
-    borderRadius: 10,
+    borderRadius: radius.m,
     paddingVertical: 13,
     paddingHorizontal: 24,
   },
-  albumButtonText: {color: '#fff', fontSize: 15, fontWeight: '600'},
-});
+  albumButtonText: {color: colors.onAccent, fontSize: 15, fontWeight: '600'},
+}));

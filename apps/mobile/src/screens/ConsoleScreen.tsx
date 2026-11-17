@@ -1,17 +1,14 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
-  Alert,
   AppState,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import {
   WebView,
   WebViewErrorEvent,
-  WebViewHttpErrorEvent,
   WebViewNavigation,
   WebViewMessageEvent,
   WebViewOpenWindowEvent,
@@ -29,17 +26,28 @@ import {
   withinQuietHours,
 } from '@zshell/core-shell';
 import {buildPatchSource} from '@zshell/patch-bundle';
+import {KIMI_TOPBAR_PATCH} from '../kimiTopbar';
 import {logDiag} from '../diagnostics';
 import {loadPrefs, notifications} from '../notifications';
-import {colors, font} from '../theme';
+import {makeStyles, Palette, radius, useTheme} from '../theme';
 
-const STATUS_META: Record<ConsoleStatus, {label: string; color: string}> = {
-  connecting: {label: '连接中…', color: colors.star},
-  connected: {label: '已连接', color: colors.success},
-  waiting: {label: '等待桌面端上线', color: colors.star},
-  disconnected: {label: '连接已断开', color: colors.danger},
-  kicked: {label: '已在其他设备连接', color: colors.danger},
-};
+function statusMeta(
+  status: ConsoleStatus,
+  colors: Palette,
+): {label: string; color: string} {
+  switch (status) {
+    case 'connecting':
+      return {label: '连接中…', color: colors.star};
+    case 'connected':
+      return {label: '已连接', color: colors.success};
+    case 'waiting':
+      return {label: '等待桌面端上线', color: colors.star};
+    case 'disconnected':
+      return {label: '连接已断开', color: colors.danger};
+    case 'kicked':
+      return {label: '已在其他设备连接', color: colors.danger};
+  }
+}
 
 function authHostOf(url: string): string {
   try {
@@ -51,6 +59,7 @@ function authHostOf(url: string): string {
 
 interface ConsoleScreenProps {
   machine: MachineRecord;
+  foreground: boolean;
   onBack: () => void;
   /**
    * Registers a web-history back handler. The system back button prefers
@@ -65,17 +74,6 @@ interface ConsoleScreenProps {
    * means signed out, staying on /devices/ means signed in).
    */
   onLoginState?: (state: MachineLoginState) => void;
-  /**
-   * DSH only: accept (true) or revoke (false) the machine's untrusted TLS
-   * certificate. Accepting reloads the console with certificate errors
-   * bypassed for this origin.
-   */
-  onSetTrustSsl?: (trust: boolean) => void;
-  /**
-   * DSH only: store the HTTP Basic credential for this origin (encrypted,
-   * machine-scoped). Saving reloads the console. Empty username clears.
-   */
-  onSetBasicAuth?: (username: string, password: string) => void;
 }
 
 /**
@@ -83,7 +81,9 @@ interface ConsoleScreenProps {
  * (matchMedia fix etc.) is injected before any page script runs; everything
  * else — relay WSS, pairing handshake — is done by the official page itself.
  */
-export function ConsoleScreen({machine, onBack, registerBackHandler, onOpenDownloads, onLoginState, onSetTrustSsl, onSetBasicAuth}: ConsoleScreenProps) {
+export function ConsoleScreen({machine, foreground, onBack, registerBackHandler, onOpenDownloads, onLoginState}: ConsoleScreenProps) {
+  const {colors, font} = useTheme();
+  const styles = useStyles();
   const webviewRef = useRef<WebView>(null);
   const canGoBackRef = useRef(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -97,6 +97,20 @@ export function ConsoleScreen({machine, onBack, registerBackHandler, onOpenDownl
   // machine prop a fresh object each time), and a new source object would
   // reload the page. Intentional reloads go through key={reloadKey}.
   const webSource = useMemo(() => ({uri: url}), [url]);
+  const isKimi = machine.credentials.kind === 'kimi';
+  const [kimiHeaderReady, setKimiHeaderReady] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(false);
+  const patchSource = useMemo(() => buildPatchSource() + (isKimi ? '\n' + KIMI_TOPBAR_PATCH : ''), [isKimi]);
+  const statusDetails = statusMeta(status, colors);
+  const pushKimiStatus = useCallback(() => {
+    const short = status === 'connected' ? '已连接' : status === 'connecting' ? '连接中' :
+      status === 'waiting' ? '等待中' : '已断开';
+    const value = JSON.stringify({short, label: statusDetails.label, color: statusDetails.color});
+    webviewRef.current?.injectJavaScript(`window.__zshellUpdateKimiStatus?.(${value}); true;`);
+  }, [status, statusDetails.label, statusDetails.color]);
+  useEffect(() => {
+    if (kimiHeaderReady) pushKimiStatus();
+  }, [kimiHeaderReady, pushKimiStatus]);
   // Notification ids must not collide across simultaneously-alive console
   // sessions: offset by a stable hash of the machine id.
   const notifyIdBase = useMemo(
@@ -146,57 +160,22 @@ export function ConsoleScreen({machine, onBack, registerBackHandler, onOpenDownl
   };
 
   const brand = hostLabel(machine.credentials);
-  // DSH remotes have no relay WebSocket for the observer patch to watch —
-  // status is derived from page loads instead (connecting / connected /
-  // disconnected), tracked via a synchronous ref to dodge event-order races.
-  const isDsh = machine.credentials.kind === 'dsh';
-  const dshLoadFailedRef = useRef(false);
-  // One SSL trust prompt per console session (auto-reload must not re-ask).
-  const sslPromptShownRef = useRef(false);
-
-  // Trust granted mid-session → retry immediately with the bypass enabled.
-  const trustedRef = useRef(machine.trustSelfSigned === true);
-  useEffect(() => {
-    const trusted = machine.trustSelfSigned === true;
-    const justTrusted = trusted && !trustedRef.current;
-    trustedRef.current = trusted;
-    if (justTrusted) {
-      logDiag('ssl-trust-reload');
-      reload();
-    }
-  }, [machine.trustSelfSigned]);
-
-  // Credential saved (e.g. from the in-console 401 prompt) → retry with it.
-  const basicAuthRef = useRef(machine.basicAuth ?? null);
-  useEffect(() => {
-    const cur = machine.basicAuth ?? null;
-    const changed = cur !== basicAuthRef.current;
-    basicAuthRef.current = cur;
-    if (changed && cur != null) {
-      logDiag('basic-auth-reload');
-      reload();
-    }
-  }, [machine.basicAuth]);
-
-  // DSH behind a reverse proxy's HTTP Basic: ask right where the 401 happens.
-  const [basicAuthPrompt, setBasicAuthPrompt] = useState(false);
-  const [basicUser, setBasicUser] = useState('');
-  const [basicPass, setBasicPass] = useState('');
-  const handleHttpError = useCallback(
-    (e: WebViewHttpErrorEvent) => {
-      if (!isDsh || e.nativeEvent.statusCode !== 401) {
-        return;
-      }
-      logDiag('http-401');
-      setBasicUser(machine.basicAuth?.username ?? '');
-      setBasicPass('');
-      setBasicAuthPrompt(true);
-    },
-    [isDsh, machine.basicAuth],
-  );
-
   const handleBridgeMessage = useCallback(
     (event: WebViewMessageEvent) => {
+      const data = event.nativeEvent.data;
+      if (isKimi && /^code-rc\.kimi\.(com|ai)$/.test(authHostOf(event.nativeEvent.url))) {
+        if (data === 'zshell:kimi-header-on' || data === 'zshell:kimi-header-off') {
+          const ready = data === 'zshell:kimi-header-on';
+          setKimiHeaderReady(ready);
+          if (ready) pushKimiStatus();
+          else setControlsVisible(false);
+          return;
+        }
+        if (data === 'zshell:kimi-menu') {
+          if (foreground) setControlsVisible(visible => !visible);
+          return;
+        }
+      }
       const bridgeEvent = parseConsoleEvent(event.nativeEvent.data);
       if (bridgeEvent == null) {
         return;
@@ -218,11 +197,12 @@ export function ConsoleScreen({machine, onBack, registerBackHandler, onOpenDownl
         return next;
       });
     },
-    [notify, brand],
+    [notify, brand, isKimi, foreground, pushKimiStatus],
   );
 
   const reload = useCallback(() => {
     logDiag('page-reload');
+    setKimiHeaderReady(false);
     setStatus('connecting');
     setLoadFailed(false);
     setReloadKey(k => k + 1);
@@ -311,49 +291,37 @@ export function ConsoleScreen({machine, onBack, registerBackHandler, onOpenDownl
     return () => registerBackHandler(null);
   }, [handleWebBack, registerBackHandler]);
 
+  // Keep the footer height fixed so expanding its controls never resizes the WebView.
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showControls = useCallback(() => {
+    setControlsVisible(true);
+    if (hideTimerRef.current != null) {
+      clearTimeout(hideTimerRef.current);
+    }
+    hideTimerRef.current = setTimeout(() => setControlsVisible(false), 5000);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (hideTimerRef.current != null) {
+        clearTimeout(hideTimerRef.current);
+      }
+    };
+  }, []);
+
   return (
     <View style={styles.root}>
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backText}>‹ 返回列表</Text>
-        </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>
-          {machine.name}
-        </Text>
-        <TouchableOpacity onPress={onOpenDownloads} style={styles.reloadButton}>
-          <Text style={styles.reloadText}>下载</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={reload} style={styles.reloadButton}>
-          <Text style={styles.reloadText}>重连</Text>
-        </TouchableOpacity>
-      </View>
-      <View style={styles.statusStrip}>
-        <View style={[styles.statusDot, {backgroundColor: STATUS_META[status].color}]} />
-        <Text style={styles.statusText}>{STATUS_META[status].label}</Text>
-      </View>
       <WebView
         key={reloadKey}
         ref={webviewRef}
         source={webSource}
-        injectedJavaScriptBeforeContentLoaded={buildPatchSource()}
+        injectedJavaScriptBeforeContentLoaded={patchSource}
+        injectedJavaScript={isKimi ? KIMI_TOPBAR_PATCH + '\ntrue;' : undefined}
         javaScriptEnabled
         domStorageEnabled
         cacheEnabled={false}
         originWhitelist={['*']}
         style={styles.webview}
         containerStyle={styles.webview}
-        // DSH self-hosted origins: user-trusted untrusted certificates and
-        // an optional reverse-proxy HTTP Basic credential (patched webview
-        // prop; both only ever set for dsh machines).
-        proceedOnSslError={isDsh && machine.trustSelfSigned === true}
-        basicAuthCredential={
-          isDsh && machine.basicAuth != null
-            ? {
-                username: machine.basicAuth.username,
-                password: machine.basicAuth.password,
-              }
-            : undefined
-        }
         // Kimi Code 登录（auth.kimi.com）经 window.open 发起，必须放行
         // 多窗口事件；onOpenWindow 把目标页导航回同一个 WebView。
         setSupportMultipleWindows
@@ -362,7 +330,6 @@ export function ConsoleScreen({machine, onBack, registerBackHandler, onOpenDownl
         // File downloads inside the console are handled by the webview's own
         // system-DownloadManager path; they land in 下载管理 (uid query).
         downloadingMessage="已开始下载，可在 设置 → 下载管理 查看"
-        onHttpError={handleHttpError}
         onNavigationStateChange={(nav: WebViewNavigation) => {
           canGoBackRef.current = nav.canGoBack;
           const url = typeof nav.url === 'string' ? nav.url : '';
@@ -374,140 +341,78 @@ export function ConsoleScreen({machine, onBack, registerBackHandler, onOpenDownl
         }}
         onLoadStart={() => {
           setLoadFailed(false);
-          dshLoadFailedRef.current = false;
-          // DSH: do NOT reset status to 'connecting' here — after a failed
-          // load Android fires another onPageStarted for its built-in error
-          // page, which would erase the 'disconnected' the error just set.
-          // ('connecting' comes from mount/reload instead.)
           logDiag('page-load-start');
-        }}
-        onLoadEnd={() => {
-          if (!isDsh) {
-            return;
-          }
-          setStatus(dshLoadFailedRef.current ? 'disconnected' : 'connected');
         }}
         onError={(e: WebViewErrorEvent) => {
           setLoadFailed(true);
-          dshLoadFailedRef.current = true;
-          if (isDsh) {
-            setStatus('disconnected');
-          }
           const desc = e.nativeEvent.description ?? '';
           logDiag('load-error', desc.slice(0, 60));
-          // DSH self-hosted origins often carry a private-CA / self-signed
-          // certificate the system rejects. Offer an explicit, per-machine
-          // trust decision (kept in the encrypted registry) once.
-          if (
-            isDsh &&
-            !sslPromptShownRef.current &&
-            machine.trustSelfSigned !== true &&
-            desc.startsWith('SSL error:')
-          ) {
-            sslPromptShownRef.current = true;
-            let host = machine.credentials.sid;
-            try {
-              host = new URL(machine.credentials.origin).host;
-            } catch {}
-            Alert.alert(
-              '证书不受信任',
-              `${host} 的证书不受系统信任（自签名或私有 CA 签发，自建 DSH 常见）。\n\n信任后，本应用连接该地址时将跳过证书校验。请确认地址属于你自己的设备——在不安全的网络上继续连接可能被窃听或篡改。`,
-              [
-                {text: '取消', style: 'cancel'},
-                {
-                  text: '信任并继续',
-                  style: 'destructive',
-                  onPress: () => onSetTrustSsl?.(true),
-                },
-              ],
-            );
-          }
         }}
         // The OS may kill the WebView renderer while backgrounded; rebuild
         // the page instead of leaving a dead surface.
         onRenderProcessGone={() => reload()}
         onMessage={handleBridgeMessage}
-        renderError={(domain: string, code: string, desc: string) => (
+        renderError={() => (
           <View style={styles.errorBox}>
             <Text style={font.dim}>控制台加载失败，多半是网络未就绪或连接中断</Text>
             <Text style={font.faint}>回到前台会自动重试，也可以现在手动重试</Text>
-            {isDsh && machine.basicAuth != null &&
-            (desc.includes('ERR_TOO_MANY_RETRIES') ||
-              desc.includes('ERR_INVALID_AUTH_CREDENTIALS')) ? (
-              <Text style={font.faint}>访问口令可能不对：长按列表卡片可修改</Text>
-            ) : isDsh && machine.basicAuth == null ? (
-              <Text style={font.faint}>
-                若该地址有 HTTP Basic 访问保护（401），{'\n'}
-                请返回列表长按卡片填写「访问口令」
-              </Text>
-            ) : null}
             <TouchableOpacity style={styles.retryButton} onPress={reload}>
-              <Text style={{color: '#fff'}}>重试</Text>
+              <Text style={styles.retryText}>重试</Text>
             </TouchableOpacity>
           </View>
         )}
       />
 
-      {basicAuthPrompt ? (
-        <View style={styles.authOverlay}>
-          <View style={styles.basicAuthCard}>
-            <Text style={font.body}>需要访问口令</Text>
-            <Text style={[font.faint, {marginTop: 6}]}>
-              {authHostOf(url)} 要求 HTTP Basic 认证（多为反向代理保护）。
-              {'\n'}口令加密存储在本机，仅用于连接该地址。
+      {!isKimi || (kimiHeaderReady && controlsVisible) ? (
+      <View style={[styles.consoleFooter, kimiHeaderReady && styles.kimiMenu]}>
+        {controlsVisible ? (
+          <View style={styles.controlBar}>
+            <TouchableOpacity onPress={onBack} style={styles.backButton}>
+              <Text style={styles.backText}>‹ 返回列表</Text>
+            </TouchableOpacity>
+            <View
+              style={[
+                styles.statusDot,
+                {backgroundColor: statusMeta(status, colors).color},
+              ]}
+            />
+            <Text style={styles.title} numberOfLines={1}>
+              {machine.name}
             </Text>
-            <TextInput
-              style={styles.basicAuthInput}
-              value={basicUser}
-              onChangeText={setBasicUser}
-              placeholder="用户名"
-              placeholderTextColor={colors.textFaint}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <TextInput
-              style={styles.basicAuthInput}
-              value={basicPass}
-              onChangeText={setBasicPass}
-              placeholder={
-                machine.basicAuth != null ? '密码（留空沿用已保存）' : '密码'
-              }
-              placeholderTextColor={colors.textFaint}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <View style={styles.basicAuthRow}>
-              <TouchableOpacity
-                style={styles.basicAuthButton}
-                onPress={() => setBasicAuthPrompt(false)}>
-                <Text style={styles.basicAuthButtonText}>取消</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.basicAuthButton,
-                  {backgroundColor: colors.accent},
-                ]}
-                disabled={basicUser.trim().length === 0}
-                onPress={() => {
-                  const user = basicUser.trim();
-                  if (user.length === 0) {
-                    return;
-                  }
-                  const pass =
-                    basicPass.length > 0
-                      ? basicPass
-                      : (machine.basicAuth?.password ?? '');
-                  setBasicAuthPrompt(false);
-                  onSetBasicAuth?.(user, pass);
-                }}>
-                <Text style={{color: '#fff', fontSize: 14, fontWeight: '600'}}>
-                  保存并重连
-                </Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              onPress={() => {
+                showControls();
+                onOpenDownloads();
+              }}
+              style={styles.reloadButton}>
+              <Text style={styles.reloadText}>下载</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                showControls();
+                reload();
+              }}
+              style={styles.reloadButton}>
+              <Text style={styles.reloadText}>重连</Text>
+            </TouchableOpacity>
           </View>
-        </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.statusPill}
+            onPress={showControls}
+            accessibilityRole="button"
+            accessibilityLabel={`${statusMeta(status, colors).label}，展开控制台操作`}
+            activeOpacity={0.8}>
+            <View
+              style={[
+                styles.statusDot,
+                {backgroundColor: statusMeta(status, colors).color},
+              ]}
+            />
+            <Text style={styles.pillText}>{statusMeta(status, colors).label}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
       ) : null}
 
       {authWindowUrl != null && (
@@ -540,42 +445,66 @@ export function ConsoleScreen({machine, onBack, registerBackHandler, onOpenDownl
   );
 }
 
-const styles = StyleSheet.create({
-  root: {flex: 1, backgroundColor: colors.bg},
-  topBar: {
-    height: 52,
+const useStyles = makeStyles((colors, font) => ({
+  root: {flex: 1, backgroundColor: colors.consoleBg},
+  consoleFooter: {
+    height: 44,
+    paddingHorizontal: 8,
+    justifyContent: 'center',
+    backgroundColor: colors.consoleBg,
+  },
+  kimiMenu: {
+    position: 'absolute',
+    top: 48,
+    left: 8,
+    right: 8,
+    borderRadius: radius.m,
     backgroundColor: colors.bgElevated,
+    elevation: 4,
+  },
+  controlBar: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    gap: 4,
   },
+  statusPill: {
+    alignSelf: 'flex-start',
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.bgElevatedOverlay,
+    borderRadius: radius.s,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  pillText: {...font.pill, color: colors.textDim},
   backButton: {paddingHorizontal: 10, paddingVertical: 8},
   backText: {color: colors.accent, fontSize: 15},
   title: {...font.body, flex: 1, textAlign: 'center'},
   reloadButton: {paddingHorizontal: 12, paddingVertical: 8},
   reloadText: {color: colors.accent, fontSize: 14},
-  statusStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    backgroundColor: colors.bgElevated,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
   statusDot: {width: 8, height: 8, borderRadius: 4},
-  statusText: {color: colors.textDim, fontSize: 12},
-  webview: {flex: 1, backgroundColor: colors.bg},
-  errorBox: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16},
+  webview: {flex: 1, backgroundColor: colors.consoleBg},
+  errorBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    padding: 32,
+    backgroundColor: colors.bg,
+  },
   retryButton: {
     backgroundColor: colors.accent,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingHorizontal: 28,
+    paddingVertical: 11,
+    borderRadius: radius.m,
+    marginTop: 4,
   },
+  retryText: {color: colors.onAccent, fontSize: 15, fontWeight: '600'},
   authOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.bg,
@@ -593,29 +522,4 @@ const styles = StyleSheet.create({
   authTitle: {...font.body, flex: 1, textAlign: 'center'},
   authClose: {paddingHorizontal: 12, paddingVertical: 8},
   authCloseText: {color: colors.accent, fontSize: 14},
-  basicAuthCard: {
-    backgroundColor: colors.bgElevated,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    padding: 18,
-    gap: 10,
-    marginHorizontal: 24,
-  },
-  basicAuthInput: {
-    backgroundColor: colors.bgInput,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: colors.text,
-    fontSize: 14,
-  },
-  basicAuthRow: {flexDirection: 'row', gap: 10, justifyContent: 'flex-end'},
-  basicAuthButton: {
-    backgroundColor: colors.bgInput,
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  basicAuthButtonText: {color: colors.textDim, fontSize: 14},
-});
+}));

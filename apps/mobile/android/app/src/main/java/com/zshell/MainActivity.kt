@@ -1,8 +1,12 @@
 package com.zshell
 
 import android.content.Context
+import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -10,6 +14,8 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnable
 import com.facebook.react.defaults.DefaultReactActivityDelegate
 
 class MainActivity : ReactActivity() {
+
+  private var consoleBarColor: Int? = null
 
   companion object {
     const val PRIVACY_PREFS = "zshell_window_privacy"
@@ -73,6 +79,7 @@ class MainActivity : ReactActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     applyWindowPrivacy()
+    applySystemBars()
     val content = findViewById<android.view.View>(android.R.id.content)
     ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
       val bars = insets.getInsets(
@@ -82,6 +89,39 @@ class MainActivity : ReactActivity() {
       v.setPadding(bars.left, bars.top, bars.right, bottom)
       WindowInsetsCompat.CONSUMED
     }
+  }
+
+  /**
+   * Day/night window chrome. uiMode is handled in-process (configChanges), so
+   * the window background and bar colors are not re-inflated from the theme
+   * on a scheme switch — re-resolve them from resources (values-night) and
+   * flip the bar icon contrast to match.
+   */
+  @Suppress("DEPRECATION")
+  fun applySystemBars() {
+    val night =
+        (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+    val bg = consoleBarColor ?: ContextCompat.getColor(this, R.color.app_background)
+    window.setBackgroundDrawable(ColorDrawable(bg))
+    // On edge-to-edge Android the system bars can be transparent; the content
+    // view owns the padded inset areas behind them.
+    findViewById<android.view.View>(android.R.id.content)?.setBackgroundColor(bg)
+    window.statusBarColor = bg
+    window.navigationBarColor = bg
+    val controller = WindowCompat.getInsetsController(window, window.decorView)
+    controller.isAppearanceLightStatusBars = !night
+    controller.isAppearanceLightNavigationBars = !night
+  }
+
+  fun setConsoleBarColor(color: Int?) {
+    consoleBarColor = color
+    applySystemBars()
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    applySystemBars()
   }
 
   /**

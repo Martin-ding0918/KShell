@@ -202,7 +202,7 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
       kind: String
   ): DownloadManager.Request =
       DownloadManager.Request(parsedUrl)
-          .setTitle(if (kind == KIND_UPDATE) "ZShell 更新" else safeName)
+          .setTitle(if (kind == KIND_UPDATE) "KShell 更新" else safeName)
           .setDescription("下载完成后可在应用内打开")
           .setNotificationVisibility(
               DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
@@ -667,7 +667,8 @@ class ApkInstallerPackage : ReactPackage {
           ApkInstallerModule(reactContext),
           CryptoModule(reactContext),
           NotificationsModule(reactContext),
-          PrivacyWindowModule(reactContext))
+          PrivacyWindowModule(reactContext),
+          AppearanceModule(reactContext))
 
   override fun createViewManagers(
       reactContext: ReactApplicationContext,

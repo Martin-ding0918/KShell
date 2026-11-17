@@ -4,7 +4,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  StyleSheet,
   Text,
   TouchableOpacity,
   View,
@@ -14,7 +13,7 @@ import {biometricAuth} from '../biometric';
 import {SecretInput} from '../components/SecretInput';
 import {verifySecretAsync} from '../securekdf';
 import {PatternPad} from '../PatternPad';
-import {colors, font} from '../theme';
+import {makeStyles, radius, useTheme} from '../theme';
 
 type SecretKind = 'pattern' | 'password';
 type Mode = 'biometric' | SecretKind;
@@ -44,6 +43,8 @@ export function biometricLabel(type?: string): string {
  * remains one tap away — one unavailable method never locks the user out.
  */
 export function LockScreen({config, onUnlock}: LockScreenProps) {
+  const {font} = useTheme();
+  const styles = useStyles();
   const secrets = activeSecrets(config);
   const [mode, setMode] = useState<Mode>(
     config.methods.biometric ? 'biometric' : (secrets[0] ?? 'password'),
@@ -80,7 +81,7 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
         return;
       }
       prompted = true;
-      const ok = await biometricAuth.prompt('验证身份以打开 ZShell');
+      const ok = await biometricAuth.prompt('验证身份以打开 KShell');
       if (cancelled) {
         return;
       }
@@ -130,7 +131,10 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
       style={styles.root}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled">
-      <Text style={styles.title}>ZShell 已锁定</Text>
+      <View style={styles.lockBadge}>
+        <Text style={styles.lockGlyph}>🔒</Text>
+      </View>
+      <Text style={styles.title}>KShell 已锁定</Text>
       <Text style={font.dim}>
         {mode === 'biometric'
           ? '使用生物识别解锁'
@@ -145,7 +149,7 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
             style={styles.button}
             onPress={async () => {
               setError(null);
-              const ok = await biometricAuth.prompt('验证身份以打开 ZShell');
+              const ok = await biometricAuth.prompt('验证身份以打开 KShell');
               if (ok) {
                 onUnlock();
               } else {
@@ -227,19 +231,29 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors, font) => ({
   root: {flex: 1, backgroundColor: colors.bg},
   content: {flexGrow: 1, alignItems: 'center', padding: 24, paddingTop: 80},
   title: {...font.title, marginBottom: 8},
+  lockBadge: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  lockGlyph: {fontSize: 30},
   button: {
     backgroundColor: colors.accent,
-    borderRadius: 10,
+    borderRadius: radius.m,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 16,
     paddingHorizontal: 40,
   },
-  buttonText: {color: '#fff', fontSize: 16, fontWeight: '600'},
+  buttonText: {color: colors.onAccent, fontSize: 16, fontWeight: '600'},
   switchRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -247,7 +261,12 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 36,
   },
-  switchButton: {padding: 6},
+  switchButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radius.s,
+    backgroundColor: colors.accentSoft,
+  },
   switchText: {color: colors.accent, fontSize: 14},
   error: {color: colors.danger, marginTop: 16, fontSize: 13, textAlign: 'center'},
-});
+}));
