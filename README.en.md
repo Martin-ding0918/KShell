@@ -21,6 +21,10 @@ Three ways to pair: scan the QR with the camera, paste the link, or pick a QR sc
 
 The console top bar and theme follow the system dark mode (captured on a Xiaomi 17).
 
+## Known issues
+
+- **Title bar lingers on new session**: creating a new session in the console leaves the page title bar in place; a fix is scheduled for the next release.
+
 ## Features
 
 - **Kimi Code remote control**: supports the official .com and .ai consoles and multiple devices.
