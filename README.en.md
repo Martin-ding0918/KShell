@@ -1,4 +1,4 @@
-# ZShell
+# KShell
 
 **English** | **[中文](./README.md)**
 
@@ -7,21 +7,29 @@
 ![react native](https://img.shields.io/badge/React%20Native-0.82-61DAFB?logo=react)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-An unofficial, open-source, zero-collection mobile client for the "Remote Control" consoles of ZCode, Kimi Code, and DSH (DeepSeek Harness) desktops.
+An unofficial, open-source, zero-collection mobile client for the "Remote Control" consoles of Kimi Code desktops.
 
-Three ways to pair: scan the QR with the camera, paste the link, or pick a QR screenshot from your gallery (PNG/JPEG decoding happens entirely on-device; no native dependency was added for it). Credentials go into encrypted storage, and the official console runs inside a hardened WebView. ZCode and Kimi Code pairing links carry only a device id (ZCode legacy links carry `sid`/`hash`; the new relay-v2 links, like Kimi Code's, carry no secret) — account login happens on the official page inside the app (ZCode requires the same account as the desktop), and the login state is kept by the system WebView (log in once, survive restarts). DSH pairs via a self-hosted address (the community remote plugin's QR is a LAN `http://<ip>:<port>` origin or your own tunnel domain; no secrets in the link, the handshake happens inside the page). The parts the official web page can't give you — credential management, app lock, multi-machine favorites, mobile experience patches — the shell provides.
+Three ways to pair: scan the QR with the camera, paste the link, or pick a QR screenshot from your gallery (PNG/JPEG decoding happens entirely on-device; no native dependency was added for it). Credentials go into encrypted storage, and the official console runs inside a hardened WebView. Kimi Code pairing links carry only a device ID — account login happens on the official page inside the app, and the login state is kept by the system WebView (log in once, survive restarts). The parts the official web page can't give you — credential management, app lock, multi-machine favorites, mobile experience patches — the shell provides.
 
-> ⚠️ Unofficial project. Not affiliated with or endorsed by ZCode / Zhipu AI / Moonshot AI / DeepSeek. You need your own desktop with "Remote Control" enabled (Kimi Code remote control additionally requires your own Kimi account with the applicable membership; DSH requires your own deployment with its community remote plugin enabled). Details in the [disclaimer](./docs/DISCLAIMER.md) (Chinese).
+> ⚠️ Unofficial project. Not affiliated with or endorsed by Moonshot AI. You need your own desktop with "Remote Control" enabled (Kimi Code remote control additionally requires your own Kimi account with the applicable membership). Details in the [disclaimer](./docs/DISCLAIMER.md) (Chinese).
+
+## Screenshots
+
+| Dark theme | Light theme |
+|---|---|
+| ![Dark theme](./docs/screenshots/mobile-dark.jpg) | ![Light theme](./docs/screenshots/mobile-light.jpg) |
+
+The console top bar and theme follow the system dark mode (captured on a Xiaomi 17).
 
 ## Features
 
-- **Multi-host support**: one shell manages ZCode (zcode.z.ai / zcode.chatglm.site), Kimi Code (code-rc.kimi.com / code-rc.kimi.ai), and DSH (self-hosted addresses) desktops; the machine list is grouped by host. DSH self-signed / private-CA certificates get an explicit per-machine trust (revocable), and reverse-proxy HTTP Basic credentials can be stored per machine (encrypted)
-- **Web login management**: sign-in happens inside the app (Kimi Code via an overlay window, ZCode inside the console page, DSH has no account system); the login state is kept by the system WebView (persists across restarts by default, toggleable), shown live on machine cards, with per-account sign-out and a wipe-all control
+- **Kimi Code remote control**: supports the official .com and .ai consoles and multiple devices.
+- **Web login management**: sign-in happens inside the app (Kimi Code via an overlay window); the login state is kept by the system WebView (persists across restarts by default, toggleable), shown live on machine cards, with per-account sign-out and a wipe-all control
 - **Machine management**: custom names, favorites pinned on top, manual ordering; re-pairing the same desktop merges the record and rotates credentials
-- **Encrypted storage**: pairing credentials (ZCode's sid and routing params, Kimi Code's device id, DSH's self-hosted address) AES-encrypted at rest, keys held by Android Keystore, never in plaintext
+- **Encrypted storage**: pairing credentials (Kimi Code's device id) AES-encrypted at rest, keys held by Android Keystore, never in plaintext
 - **App lock**: fingerprint / face, pattern, and password can all be enabled at once — any one unlocks, so a single failed method never locks you out; auto-relock on returning from background; biometric availability detected per device
 - **Connection status & notifications**: live status strip above the console (connecting / connected / waiting for desktop / disconnected / kicked); local notifications on disconnect, kick, and approval-waiting
-- **In-app updates**: checks GitHub Releases with visible download progress, translated failure reasons, and a browser-download fallback; optional auto-check on launch (notify only, never auto-install)
+- **Independent releases**: KShell does not check for upstream APK updates. Upgrade with a KShell APK signed with the same key.
 - **Download manager**: update packages and files downloaded from console pages in one list — progress, pause/resume with reason notices, cancel, open, delete, retry; stuck downloads (no progress for 2 min) auto-cancel with a notice
 - **Behavior patches**: document-start injection with self-retiring probes — e.g. fixes "Enter submits instead of newline" on some mobile browsers
 - **Compliance**: first-launch consent gate for the user agreement & privacy policy; a legal-document center in settings; zero data collection
