@@ -13,9 +13,17 @@ Kimi Code / ZCode 桌面端「远程控制」的手机壳客户端。非官方�
 
 ## 界面预览
 
+**Kimi Code**
+
 | 深色主题 | 浅色主题 |
 |---|---|
-| ![深色主题](./docs/screenshots/mobile-dark.jpg) | ![浅色主题](./docs/screenshots/mobile-light.jpg) |
+| ![Kimi Code 深色主题](./docs/screenshots/mobile-dark.jpg) | ![Kimi Code 浅色主题](./docs/screenshots/mobile-light.jpg) |
+
+**ZCode**
+
+| 深色主题 | 浅色主题 |
+|---|---|
+| ![ZCode 深色主题](./docs/screenshots/zcode-dark.jpg) | ![ZCode 浅色主题](./docs/screenshots/zcode-light.jpg) |
 
 控制台顶栏与主题随系统深色模式自动切换（小米 17 实机截图）。Kimi 会话页顶栏交互集中在两处：点击会话标题即可切换会话；点击「已连接」胶囊弹出菜单，可选「返回列表」（结束当前视图，回到客户端列表）、「下载管理」和「重新加载」。ZCode 会话页的四条工具栏同样合并为一条：`‹（网页返回） | 会话标题 | ● 连接胶囊 | 侧栏`——点连接胶囊展开菜单（返回列表 / 所有会话 / 下载管理 / 重新加载 / 原会话菜单 / 主题），侧栏只开关侧栏，断线时胶囊变为「重连」。
 
