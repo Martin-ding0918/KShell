@@ -62,14 +62,6 @@ cd apps/mobile/android
 
 本项目 fork 自 [Amwidtf/zshell](https://github.com/Amwidtf/zshell)；源码与公开安装包均在本仓库维护。
 
-## 多平台路线
-
-| 平台 | 状态 |
-|---|---|
-| Android | ✅ 可用（RN 0.82） |
-| HarmonyOS NEXT | 📋 规划中（RNOH） |
-| iOS | 📋 规划中（构建需要 macOS） |
-
 ## 安全与隐私
 
 零收集是底线：无后端、无账号、无遥测，所有数据只在本机加密存储里。配对凭据等同密码，建议在桌面端定期轮换；远程会话经官方中继传输，处理敏感代码库前自己权衡。全文：[隐私政策](./docs/PRIVACY.md)、[安全说明](./docs/SECURITY.md)、[免责声明](./docs/DISCLAIMER.md)。
