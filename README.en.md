@@ -2,7 +2,7 @@
 
 **English** | **[中文](./README.md)**
 
-![version](https://img.shields.io/github/v/release/Martin-ding0918/KShell-public?label=version&color=blue)
+![version](https://img.shields.io/github/v/release/Martin-ding0918/KShell-fork?label=version&color=blue)
 ![platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)
 ![react native](https://img.shields.io/badge/React%20Native-0.82-61DAFB?logo=react)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -23,7 +23,7 @@ The console top bar and theme follow the system dark mode (captured on a Xiaomi 
 
 ## Download
 
-Download the ARM64 APK from [KShell Releases](https://github.com/Martin-ding0918/KShell-public/releases/latest).
+Download the ARM64 APK from [KShell Releases](https://github.com/Martin-ding0918/KShell-fork/releases/latest).
 Version 0.0.1.11 fixes stale headers and keeps the settings button on the right. The new-session
 welcome screen retains the project header shown in the web console.
 
@@ -66,7 +66,7 @@ cd apps/mobile/android
 ./gradlew assemblePublicRelease      # public ARM64 APK (requires release signing)
 ```
 
-KShell is a fork of [Amwidtf/zshell](https://github.com/Amwidtf/zshell). Public APKs are released separately.
+KShell is a fork of [Amwidtf/zshell](https://github.com/Amwidtf/zshell). Source code and public APKs are maintained in this repository.
 
 ## Platform Roadmap
 

@@ -1,6 +1,6 @@
 # 发版流程
 
-只发布 KShell-public 的 `arm64-v8a` APK。私有自用版已停止构建和发布。
+公开版在 KShell-fork 发布，仅提供 `arm64-v8a` APK。私有自用版已停止构建和发布。
 
 ## 版本规范
 
@@ -21,9 +21,10 @@
 1. 更新版本和 `CHANGELOG.md`，完成 `AGENTS.md` 的发版检查单。
 2. 按 [构建指南](./build.md) 加载正式签名，从 Android 目录运行 `./gradlew clean assemblePublicRelease`。
 3. 在 `app/build/outputs/apk/public/release/` 核对只有一个 `KShell-<版本>-arm64-v8a-publicRelease.apk`。用 `aapt dump badging` 核对 `native-code: 'arm64-v8a'`、包名 `io.github.martinding0918.kshell` 和内部版本。用 `apksigner verify --print-certs` 核对正式签名，再生成该 APK 的 SHA-256。
-4. 将源码提交到 fork 的 `main`。在 [KShell-public Releases](https://github.com/Martin-ding0918/KShell-public/releases) 创建 `v<版本>`，上传该 ARM64 APK 和对应 SHA-256 校验文件。
+4. 将源码提交到 fork 的 `main`。在 [KShell-fork Releases](https://github.com/Martin-ding0918/KShell-fork/releases) 创建指向该源码提交的 `v<版本>`，上传该 ARM64 APK 和对应 SHA-256 校验文件。
 
-源码 fork 的 CI 可以构建和校验 ARM64 产物。GitHub Release 由 KShell-public 仓库手动发布。
+CI 可以构建和校验 ARM64 产物，GitHub Release 仍手动发布。
+0.0.1.11 及更旧的公开 APK 内置 KShell-public 更新地址。用新地址构建的首个正式版还需将同一签名 APK 同步到 KShell-public，作为旧版的过渡更新，不能只改文档或删除旧仓库。
 
 ## Release 说明规范
 

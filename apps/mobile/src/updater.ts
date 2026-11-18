@@ -4,7 +4,7 @@ import {
   ReleaseInfo,
 } from '@zshell/core-shell';
 
-const REPOSITORY = 'Martin-ding0918/KShell-public';
+const REPOSITORY = 'Martin-ding0918/KShell-fork';
 const RELEASES = `https://api.github.com/repos/${REPOSITORY}/releases`;
 const ARM64_ONLY = ['arm64-v8a'];
 export const PROJECT_PAGE = `https://github.com/${REPOSITORY}`;

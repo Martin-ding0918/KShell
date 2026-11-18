@@ -2,7 +2,7 @@
 
 **[English](./README.en.md)** ｜ **中文**
 
-![version](https://img.shields.io/github/v/release/Martin-ding0918/KShell-public?label=version&color=blue)
+![version](https://img.shields.io/github/v/release/Martin-ding0918/KShell-fork?label=version&color=blue)
 ![platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)
 ![react native](https://img.shields.io/badge/React%20Native-0.82-61DAFB?logo=react)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -23,7 +23,7 @@ Kimi Code 桌面端「远程控制」的手机壳客户端。非官方、开源�
 
 ## 下载
 
-从 [KShell Releases](https://github.com/Martin-ding0918/KShell-public/releases/latest) 下载 ARM64 APK。
+从 [KShell Releases](https://github.com/Martin-ding0918/KShell-fork/releases/latest) 下载 ARM64 APK。
 0.0.1.11 修复切换会话时的旧顶栏残留和设置按钮错位；新建会话的欢迎页保留网页原有的项目顶栏。
 
 ## 功能
@@ -65,7 +65,7 @@ cd apps/mobile/android
 ./gradlew assemblePublicRelease      # 构建公开 ARM64 APK（需配置正式签名）
 ```
 
-本项目 fork 自 [Amwidtf/zshell](https://github.com/Amwidtf/zshell)；公开安装包单独发布。
+本项目 fork 自 [Amwidtf/zshell](https://github.com/Amwidtf/zshell)；源码与公开安装包均在本仓库维护。
 
 ## 多平台路线
 
