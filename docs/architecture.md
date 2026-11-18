@@ -5,7 +5,7 @@
 ## 总体结构
 
 ```
-zshell/                            # npm workspaces monorepo
+KShell/                            # npm workspaces monorepo
 ├── packages/
 │   ├── core-shell/              # 零框架依赖的纯 TS 核心
 │   └── patch-bundle/            # 注入官方页面的行为补丁
@@ -20,15 +20,14 @@ zshell/                            # npm workspaces monorepo
 
 全部业务逻辑（配对 URL 解析、endpoint 双线选择、状态机、机器注册表、应用锁模型、
 SHA-256/HMAC/PBKDF2/Base64）放在 `packages/core-shell`，**不 import 任何框架**，
-并以严格 TS 子集编写（无 `any`、类型显式）。目的：ArkTS 是 TS 的严格化子集，
-未来鸿蒙原生壳可直接复用同一份核心——**逻辑单源，多端生效**。
+并以严格 TS 子集编写（无 `any`、类型显式）——**逻辑单源**。
 
 配套约束：平台能力一律通过端口接口注入（`src/ports.ts`）：
 
-| 端口 | Android/iOS 实现（当前） | 鸿蒙实现（未来） |
-|---|---|---|
-| `SecureKvStore` | MMKV withEncryption（Keystore 托管密钥） | Asset Store Kit / preferences 加密 |
-| `BiometricAuth` | react-native-biometrics | HarmonyOS UserAuth |
+| 端口 | Android 实现（当前） |
+|---|---|
+| `SecureKvStore` | MMKV withEncryption（Keystore 托管密钥） |
+| `BiometricAuth` | react-native-biometrics |
 
 ### 2. 壳路线：官方页面是产品主体
 
@@ -85,13 +84,3 @@ App.tsx 用栈状态自管理导航（未引入 react-navigation，保持依赖�
 JS 侧 `ThemeProvider` 按偏好或 `useColorScheme()` 选调色板，样式用
 `makeStyles` 按方案缓存生成。
 
-## 多平台路线
-
-| 平台 | 状态 | 路径 |
-|---|---|---|
-| Android | ✅ 可用 | 当前 RN 0.82（新架构 Fabric） |
-| HarmonyOS NEXT | 📋 规划 | 同一 RN 工程 + RNOH；若受阻则退「三端原生壳 + core-shell 直用」 |
-| iOS | 📋 规划 | 工程含 iOS 脚手架；构建需 macOS / 云 Mac |
-
-三端调研结论详见团队内部资料；对外决策记录：单代码库优先（RN+RNOH），
-核心资产（core-shell / patch-bundle）无条件框架无关。
