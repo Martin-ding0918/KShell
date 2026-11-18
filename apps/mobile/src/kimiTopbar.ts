@@ -1,21 +1,7 @@
 // Compact Kimi Code console topbar.
 //
-// Observed header: `.app.mobile > .topbar` holding `.tb-main` (title line) and
-// a trailing icon button. Version 0.0.1.9 only styled it when the route
-// matched /^\/devices\// and the header carried both that icon button and a
-// `.tb-main .tb-line`; a session created inside the console changes the route
-// and rebuilds the topbar, so the patch dropped `data-zshell-compact` and the
-// page's own full-height title bar stayed on screen (known issue of 0.0.1.9).
-//
-// Rules learned from that:
-//  - The route is irrelevant: any `.app.mobile > .topbar` rooted in
-//    `.tb-main` is a session header and gets compacted.
-//  - The status pill goes after the title block, before the trailing icon
-//    button when one exists, else appended with margin-left:auto.
-//  - The page is a SPA: route changes go through history.pushState /
-//    replaceState and are caught, plus a cheap sanity timer.
-//  - Text truncation is enforced on every descendant of `.tb-main`, not on
-//    assumed class names, so renamed internals still cannot overflow.
+// Session transitions can leave an empty header or mount its replacement
+// before removing the previous one. Only the current header owns a status pill.
 //
 // The same script is injected twice (`beforeContentLoaded` and after load);
 // the second run reuses the first observer through `__zshellRefreshKimiTopbar`.
@@ -31,10 +17,14 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
       if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(event);
     };
     var host = '.app.mobile > .topbar';
-    var sel = host + '[data-zshell-compact]';
+    var compact = 'data-zshell-compact';
+    var hidden = 'data-zshell-header-hidden';
+    var trailing = 'data-zshell-trailing';
+    var sel = host + '[' + compact + ']';
     var style = document.createElement('style');
     style.textContent = [
-      host + '{display:flex!important;gap:6px;padding:0 8px 0 12px!important;height:48px!important;min-height:48px!important;max-height:48px!important;align-items:center;overflow:hidden}',
+      sel + '{display:flex!important;justify-content:flex-start!important;gap:6px;padding:0 8px 0 12px!important;height:48px!important;min-height:48px!important;max-height:48px!important;align-items:center;overflow:hidden}',
+      host + '[' + hidden + ']{display:none!important}',
       sel + ' > .tb-main{flex:0 1 auto;min-width:0;width:auto;height:44px!important;padding:0!important;justify-content:flex-start;text-align:left;overflow:hidden}',
       sel + ' .tb-main *{min-width:0}',
       sel + ' > .tb-main .tb-line{min-width:0;width:100%;font-size:13px!important;display:flex;align-items:center;gap:4px;overflow:hidden}',
@@ -44,8 +34,8 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
       sel + ' > .tb-main .sl{display:none}',
       sel + ' .cv{flex:none;width:11px}',
       sel + ' > .ui-icon-button{flex:none;width:40px!important;height:40px!important}',
-      sel + ' > .zshell-status{flex:none;display:flex;align-items:center;gap:4px;height:30px;padding:0 8px;border:1px solid var(--color-line,currentColor);border-radius:999px;background:var(--color-surface,transparent);color:inherit;font:inherit;font-size:11px;white-space:nowrap;cursor:pointer}',
-      sel + ' > .zshell-status[data-tail]{margin-left:auto}',
+      sel + ' > [' + trailing + ']{margin-inline-start:auto!important}',
+      sel + ' > .zshell-status{flex:none;display:flex;align-items:center;gap:4px;height:30px;margin:0;padding:0 8px;border:1px solid var(--color-line,currentColor);border-radius:999px;background:var(--color-surface,transparent);color:inherit;font:inherit;font-size:11px;white-space:nowrap;cursor:pointer}',
       '.zshell-status i{width:6px;height:6px;border-radius:50%;flex:none;background:var(--zshell-dot,#888)}',
       '.zshell-menu{position:fixed;top:52px;right:8px;z-index:2147483000;display:flex;flex-direction:column;min-width:148px;padding:5px;border:1px solid var(--color-line,rgba(127,127,127,.28));border-radius:12px;background:var(--color-bg-elevated,var(--color-surface,#fff));box-shadow:0 10px 28px rgba(0,0,0,.2);font:inherit}',
       '.zshell-menu button{all:unset;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:9px 10px;border-radius:8px;font-size:13px;cursor:pointer;color:inherit}',
@@ -53,7 +43,7 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
       '.zshell-menu small{font-size:11px;opacity:.55}',
       '@media(max-width:310px){' + sel + ' > .zshell-status{padding-inline:5px}' + sel + ' > .ui-icon-button{width:34px!important}.zshell-status span{display:none}}'
     ].join('\n');
-    var active = null, dot = null, label = null, current = null, menu = null;
+    var active = null, action = null, dot = null, label = null, current = null, menu = null;
     var render = function () {
       if (!dot || !current) return;
       dot.style.setProperty('--zshell-dot', current.color);
@@ -62,9 +52,13 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
       dot.title = current.label;
     };
     window.__zshellUpdateKimiStatus = function (value) { current = value; render(); };
+    var dismissMenu = function (e) {
+      if (menu && !menu.contains(e.target) && !dot.contains(e.target)) closeMenu();
+    };
     var closeMenu = function () {
       if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
       menu = null;
+      document.removeEventListener('click', dismissMenu, true);
     };
     var openMenu = function () {
       closeMenu();
@@ -93,39 +87,61 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
       item('重新加载', '', function () { post('zshell:kimi-reload'); });
       document.body.appendChild(m);
       menu = m;
-      setTimeout(function () {
-        var dismiss = function (e) {
-          if (menu && !m.contains(e.target) && e.target !== dot) {
-            closeMenu();
-            document.removeEventListener('click', dismiss, true);
-          }
-        };
-        document.addEventListener('click', dismiss, true);
-      }, 0);
+      document.addEventListener('click', dismissMenu, true);
     };
     var forget = function () {
       closeMenu();
-      if (active) active.removeAttribute('data-zshell-compact');
+      if (active) active.removeAttribute(compact);
+      if (action) action.removeAttribute(trailing);
       if (dot && dot.parentNode) dot.parentNode.removeChild(dot);
       active = null;
+      action = null;
+      dot = null;
+      label = null;
+    };
+    var visible = function (node) {
+      return !node.hidden && node.getAttribute('aria-hidden') !== 'true' && node.style.display !== 'none';
     };
     var scan = function (announce) {
       try {
-        var header = document.querySelector(host);
-        if (header) {
-          var main = header.querySelector(':scope > .tb-main');
-          if (!main || header.querySelector('.tb-line') == null) header = null;
-        }
-        var anchor = header && header.querySelector(':scope > .ui-icon-button');
-        if (header === active && (!header || (dot.parentElement === header &&
-            (anchor ? dot.nextElementSibling === anchor : dot.nextElementSibling == null)))) {
+        var headers = Array.from(document.querySelectorAll(host)).filter(function (candidate) {
+          return visible(candidate) && visible(candidate.parentElement);
+        });
+        var header = headers[headers.length - 1] || null;
+        var main = header && header.querySelector(':scope > .tb-main');
+        if (main && !visible(main)) main = null;
+        var buttons = header ? Array.from(header.querySelectorAll(':scope > .ui-icon-button')).filter(visible) : [];
+        var anchor = buttons[buttons.length - 1] || null;
+
+        if (header && !style.isConnected) (document.head || document.documentElement).appendChild(style);
+        headers.forEach(function (candidate) {
+          if (candidate.parentElement !== header.parentElement) {
+            candidate.removeAttribute(hidden);
+            return;
+          }
+          // A shell with no title or controls should not reserve a toolbar row.
+          // Ignore our own pill when deciding whether the page still needs it.
+          var content = Array.from(candidate.childNodes).some(function (child) {
+            if (child.nodeType === 3) return child.textContent.trim() !== '';
+            if (child.nodeType !== 1 || child === dot || !visible(child)) return false;
+            if (child.textContent.trim() !== '') return true;
+            if (child.matches('.tb-main')) return child.querySelector('.cv') !== null;
+            return child.matches('.ui-icon-button, button, a[href], [role="button"]') ||
+              child.querySelector('button, a[href], [role="button"]') !== null;
+          });
+          candidate.toggleAttribute(hidden, candidate !== header || !content);
+        });
+        if (header && (header.hasAttribute(hidden) || (!main && !anchor))) header = null;
+        if (!header) anchor = null;
+        if (header === active && action === anchor && (!header || (dot.parentElement === header &&
+            (main ? dot.previousElementSibling === main : dot.nextElementSibling === anchor)))) {
           if (announce) post(header ? 'zshell:kimi-header-on' : 'zshell:kimi-header-off');
           return;
         }
         forget();
-        active = header || null;
-        if (!active) { post('zshell:kimi-header-off'); return; }
-        if (!style.isConnected) (document.head || document.documentElement).appendChild(style);
+        if (!header) { post('zshell:kimi-header-off'); return; }
+        active = header;
+        action = anchor;
         dot = document.createElement('button');
         dot.type = 'button';
         dot.className = 'zshell-status';
@@ -136,13 +152,9 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
           if (menu) closeMenu();
           else openMenu();
         });
-        if (anchor) {
-          active.insertBefore(dot, anchor);
-        } else {
-          active.appendChild(dot);
-          dot.setAttribute('data-tail', '');
-        }
-        active.setAttribute('data-zshell-compact', '');
+        active.insertBefore(dot, main ? main.nextSibling : action);
+        if (action) action.setAttribute(trailing, '');
+        active.setAttribute(compact, '');
         render();
         post('zshell:kimi-header-on');
       } catch (_) { /* Leave the original controls available. */ }
@@ -152,7 +164,10 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
       if (pending) return;
       pending = true;
       requestAnimationFrame(function () { pending = false; scan(); });
-    }).observe(document, {childList:true,subtree:true});
+    }).observe(document, {
+      childList:true, characterData:true, subtree:true, attributes:true,
+      attributeFilter:['class', 'hidden', 'aria-hidden', 'style']
+    });
     window.__zshellRefreshKimiTopbar = function () { scan(true); };
     // SPA route changes: the page swaps headers without a reload, so a route
     // change must re-scan even when MutationObserver misses the timing.

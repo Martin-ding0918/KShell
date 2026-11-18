@@ -40,9 +40,6 @@ export function compareVersions(a: string, b: string): number {
       const n = /^\d+$/.test(p) ? Number(p) : 0;
       return n;
     });
-    while (core.length < 3) {
-      core.push(0);
-    }
     const preMatch = preRaw != null ? /^([a-z]+)\.(\d+)$/i.exec(preRaw) : null;
     const pre = preMatch
       ? {name: preMatch[1].toLowerCase(), num: Number(preMatch[2])}
@@ -51,10 +48,9 @@ export function compareVersions(a: string, b: string): number {
   };
   const va = parse(a);
   const vb = parse(b);
-  for (let i = 0; i < 3; i++) {
-    if (va.core[i] !== vb.core[i]) {
-      return va.core[i] - vb.core[i];
-    }
+  for (let i = 0; i < Math.max(va.core.length, vb.core.length); i++) {
+    const difference = (va.core[i] ?? 0) - (vb.core[i] ?? 0);
+    if (difference !== 0) return difference;
   }
   // No pre-release beats any pre-release.
   if (va.pre == null && vb.pre == null) {
@@ -114,6 +110,7 @@ export function preferredAbiTags(abis: readonly string[]): string[] {
 function pickApkAsset(
   assets: AssetLike[],
   prefer: readonly string[] = ['arm64-v8a', 'universal'],
+  requirePreferred = false,
 ): AssetLike | null {
   const apks = assets.filter(
     a =>
@@ -130,13 +127,14 @@ function pickApkAsset(
       return hit;
     }
   }
-  return apks[0];
+  return requirePreferred ? null : apks[0];
 }
 
 /** Extract update info from a GitHub `releases/latest` response; null when unusable. */
 export function parseLatestRelease(
   json: unknown,
   prefer?: readonly string[],
+  requirePreferred = false,
 ): ReleaseInfo | null {
   if (json == null || typeof json !== 'object') {
     return null;
@@ -146,7 +144,7 @@ export function parseLatestRelease(
     return null;
   }
   const assets = Array.isArray(rel.assets) ? (rel.assets as AssetLike[]) : [];
-  const apk = pickApkAsset(assets, prefer);
+  const apk = pickApkAsset(assets, prefer, requirePreferred);
   if (apk == null) {
     return null;
   }
@@ -168,13 +166,14 @@ export function parseLatestRelease(
 export function pickLatestRelease(
   json: unknown,
   prefer?: readonly string[],
+  requirePreferred = false,
 ): ReleaseInfo | null {
   if (!Array.isArray(json)) {
     return null;
   }
   let best: ReleaseInfo | null = null;
   for (const item of json) {
-    const info = parseLatestRelease(item, prefer);
+    const info = parseLatestRelease(item, prefer, requirePreferred);
     if (info == null) {
       continue;
     }

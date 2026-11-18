@@ -89,53 +89,31 @@ android {
 
     namespace "com.zshell"
     defaultConfig {
-        // Per-flavor below: public (io.github.martinding0918.kshell) and
-        // self-use (com.zshell, the pre-0.0.1.9 package users already have).
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 27
-        versionName "0.0.1.10"
+        versionCode 28
+        versionName "0.0.1.11"
         manifestPlaceholders = [allowCleartextTraffic: "false"]
     }
 
-    // Two distribution channels from one source (see README-STATUS.md):
-    //   public -> KShell-public releases, formal signing key, self-update on
-    //   self   -> private KShell releases, same key material, com.zshell so it
-    //             overwrites the installed 0.0.1.8 without touching its data.
-    // The JS side reads CHANNEL (updater / project page) from BuildInfo.
-    // `public` is a Groovy keyword, so the flavors are declared with create().
+    // Keep the established public build tasks and APK names.
     flavorDimensions "channel"
     productFlavors {
         create("public") {
             dimension "channel"
             applicationId "io.github.martinding0918.kshell"
-            buildConfigField "String", "CHANNEL", '"public"'
-            buildConfigField "String", "PROJECT_PAGE", '"https://github.com/Martin-ding0918/KShell-public"'
-        }
-        create("self") {
-            dimension "channel"
-            applicationId "com.zshell"
-            buildConfigField "String", "CHANNEL", '"self"'
-            buildConfigField "String", "PROJECT_PAGE", '"https://github.com/Martin-ding0918/KShell"'
         }
     }
 
-    // Artifact naming: KShell-<version>-[self-]<abi>-<buildType>.apk. Release
-    // names stay channel-neutral (the two channels carry the same version and
-    // differ by package); debug builds keep the flavor in the name so both can
-    // sit on one device at once. ABI splits carry the abi name, one universal
-    // APK stays as the fallback (also what the in-app updater prefers after
-    // arm64).
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
-            def abi = output.getFilter(com.android.build.OutputFile.ABI) ?: "universal"
+            def abi = output.getFilter(com.android.build.OutputFile.ABI)
             def flavor = variant.buildType.name == 'release' ? "" : "-${variant.flavorName}"
             outputFileName = "KShell-${variant.versionName}${flavor}-${abi}-${variant.name}.apk"
         }
     }
 
     buildFeatures {
-        // The React Native template disables it; the channel fields need it.
         buildConfig true
     }
 
@@ -143,8 +121,8 @@ android {
         abi {
             enable true
             reset()
-            include "arm64-v8a", "armeabi-v7a", "x86_64"
-            universalApk true
+            include "arm64-v8a"
+            universalApk false
         }
     }
 
@@ -181,7 +159,7 @@ android {
     }
 }
 
-tasks.matching { it.name == 'preReleaseBuild' }.configureEach {
+tasks.matching { it.name == 'prePublicReleaseBuild' }.configureEach {
     doFirst {
         if (!project.findProperty('ZS_STORE_FILE') || !project.findProperty('ZS_STORE_PASSWORD')) {
             throw new GradleException('KShell release signing is required: set ZS_STORE_FILE and ZS_STORE_PASSWORD.')

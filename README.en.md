@@ -2,7 +2,7 @@
 
 **English** | **[中文](./README.md)**
 
-![version](https://img.shields.io/github/v/tag/Amwidtf/zshell?label=version&color=blue)
+![version](https://img.shields.io/github/v/release/Martin-ding0918/KShell-public?label=version&color=blue)
 ![platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)
 ![react native](https://img.shields.io/badge/React%20Native-0.82-61DAFB?logo=react)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -21,10 +21,11 @@ Three ways to pair: scan the QR with the camera, paste the link, or pick a QR sc
 
 The console top bar and theme follow the system dark mode (captured on a Xiaomi 17).
 
-## Known issues
+## Download
 
-- None. 0.0.1.10 fixes the 0.0.1.9 "title bar lingers on a new session" bug: the top-bar
-  patch no longer keys off the route, so a rebuilt session header is re-compacted right away.
+Download the ARM64 APK from [KShell Releases](https://github.com/Martin-ding0918/KShell-public/releases/latest).
+Version 0.0.1.11 fixes stale headers and keeps the settings button on the right. The new-session
+welcome screen retains the project header shown in the web console.
 
 ## Features
 
@@ -62,10 +63,10 @@ Requirements: Node ≥ 22, npm ≥ 12, JDK 17–21, Android SDK (API 36). Read t
 npm install                          # install everything (incl. npm patch)
 npx vitest run                       # core-shell unit tests
 cd apps/mobile/android
-./gradlew assembleRelease            # standalone release APK
+./gradlew assemblePublicRelease      # public ARM64 APK (requires release signing)
 ```
 
-Published builds live in [Releases](https://github.com/Amwidtf/zshell/releases); tags build automatically.
+KShell is a fork of [Amwidtf/zshell](https://github.com/Amwidtf/zshell). Public APKs are released separately.
 
 ## Platform Roadmap
 

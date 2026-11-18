@@ -19,6 +19,7 @@ describe('compareVersions', () => {
     ['0.0.1-beta.1', '0.0.1-alpha.5', 1],
     ['0.0.1-rc.1', '0.0.1-beta.1', 1],
     ['0.0.1', '0.0.1', 0],
+    ['0.0.1.11', '0.0.1.10', 1],
   ])('%s vs %s -> %i', (a, b, expected) => {
     expect(compareVersions(a, b)).toBe(expected);
   });
@@ -86,6 +87,17 @@ describe('parseLatestRelease', () => {
     expect(
       parseLatestRelease({tag_name: 'v1.0.0', assets: [{name: 'x.txt'}]}),
     ).toBeNull();
+  });
+
+  it('requires an ARM64 asset when fallbacks are disabled', () => {
+    const arm = {tag_name: 'v0.0.1.11', assets: [
+      {name: 'KShell-0.0.1.11-public-arm64-v8a.apk', browser_download_url: 'arm'},
+    ]};
+    const other = {tag_name: 'v0.0.1.12', assets: [
+      {name: 'KShell-0.0.1.12-public-universal.apk', browser_download_url: 'universal'},
+    ]};
+    expect(parseLatestRelease(other, ['arm64-v8a'], true)).toBeNull();
+    expect(pickLatestRelease([other, arm], ['arm64-v8a'], true)?.apkUrl).toBe('arm');
   });
 
   it('honors a device-derived asset preference (translation env -> universal)', () => {

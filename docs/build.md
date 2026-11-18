@@ -15,35 +15,29 @@
 npm install                                  # 根目录：全部 workspace + npm patch
 npx vitest run                               # core-shell 单元测试
 cd apps/mobile/android && ./gradlew assembleDebug     # 调试包
-cd apps/mobile/android && ./gradlew assembleRelease   # 发布包（JS 已内置，可独立运行）
+cd apps/mobile/android && ./gradlew assemblePublicRelease # 发布包（JS 已内置，可独立运行）
 cd apps/mobile && npm start                  # Metro（仅调试包需要）
 ```
 
-公开版签名：`assembleRelease` 必须提供 `ZS_STORE_FILE` 和 `ZS_STORE_PASSWORD`，
+设置 `CHROME_PATH` 指向 Chrome 或 Chromium 后，可在仓库根目录运行
+`node apps/mobile/__tests__/kimiTopbar.browser.mjs`，验证 Kimi 顶栏切换及窄屏布局。
+
+公开版签名：`assemblePublicRelease` 必须提供 `ZS_STORE_FILE` 和 `ZS_STORE_PASSWORD`，
 默认别名为 `kshell`。通过本机环境变量 `ORG_GRADLE_PROJECT_ZS_STORE_FILE`、
 `ORG_GRADLE_PROJECT_ZS_STORE_PASSWORD` 传入，不把口令写进命令参数或仓库。
 没有正式密钥时构建会失败，不回退到调试签名。后续升级必须继续使用相同的密钥。
 
-两个 product flavor 共用源码与 versionCode（产物名 `KShell-<版本>-<abi>-release.apk`，
-调试包带 `-self` / `-public` 以便同机并存；总包 `assembleRelease` 依次产出两个渠道）：
+当前仅构建公开版 `io.github.martinding0918.kshell`。正式包位于
+`apps/mobile/android/app/build/outputs/apk/public/release/`，文件名为
+`KShell-<版本>-arm64-v8a-publicRelease.apk`。
 
-| flavor | 包名 | 渠道 |
-|---|---|---|
-| `public` | `io.github.martinding0918.kshell` | KShell-public 公开版，应用内检查公开更新 |
-| `self` | `com.zshell` | 私有 KShell 自用版，覆盖 0.0.1.8 及更早版本、配对数据连续；设置页指向私有仓库，不检查更新 |
-
-单渠道构建：`./gradlew assembleSelfRelease` / `assemblePublicRelease`。
-
-两个 flavor 用 `create()` 声明（`public` 是 Groovy 关键字，直接 `public { }` 会让整份
-构建脚本解析失败），且注释里不要出现不成对的英文撇号（Groovy 会当成字符串起始）。
-
-模拟器调试（本机 MuMu 约定端口 16512）：
+ARM64 模拟器调试（本机 MuMu 约定端口 16512）：
 
 ```bash
 adb connect 127.0.0.1:16512
 adb -s 127.0.0.1:16512 reverse tcp:8081 tcp:8081     # 调试包需要
 adb -s 127.0.0.1:16512 install -r <apk>
-adb -s 127.0.0.1:16512 shell am start -n com.zshell/.MainActivity
+adb -s 127.0.0.1:16512 shell am start -n io.github.martinding0918.kshell.debug/com.zshell.MainActivity
 ```
 
 ## 已知坑与解法（务必先读）
@@ -79,9 +73,8 @@ grep foojay node_modules/@react-native/gradle-plugin/settings.gradle.kts   # 应
 
 ## CI（GitHub Actions）
 
-`.github/workflows/android.yml`：push main → 测试 + 构建 + 产物；push `v*` 标签 →
-再创建带 APK 的 Release（说明取自 CHANGELOG 对应版本段落）。公开仓库 Actions
-免费不限时长。
+`.github/workflows/android.yml` 在主分支推送或手动触发时运行测试并构建公开 ARM64 APK。
+工作流校验 native ABI 与签名后上传构建产物。正式发布见 [发版流程](./release.md)。
 
 ## 代码规范速查
 

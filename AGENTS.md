@@ -27,7 +27,7 @@ MuMu 模拟器调试（本机约定端口 16512）：
 adb connect 127.0.0.1:16512
 adb -s 127.0.0.1:16512 reverse tcp:8081 tcp:8081
 adb -s 127.0.0.1:16512 install -r <apk路径>
-adb -s 127.0.0.1:16512 shell am start -n com.zshell/.MainActivity
+adb -s 127.0.0.1:16512 shell am start -n io.github.martinding0918.kshell.debug/com.zshell.MainActivity
 ```
 
 ## 硬约束（违反会导致构建损坏或合规风险）
@@ -61,8 +61,8 @@ adb -s 127.0.0.1:16512 shell am start -n com.zshell/.MainActivity
 ## 发布检查单（每次发版）
 
 - [ ] `npx vitest run` 全绿
-- [ ] `./gradlew assembleDebug`（以及需要的 release 变体）成功；
-      两个渠道都是 release 变体：`assembleSelfRelease` / `assemblePublicRelease`
+- [ ] `./gradlew assemblePublicRelease` 成功，唯一的 APK 为 `arm64-v8a`，
+      包名为 `io.github.martinding0918.kshell`，使用原有正式签名
 - [ ] 版本号已用脚本同步：`node scripts/bump-version.mjs <版本号>|pre [versionCode]`
       一次写入根 `package.json`、`apps/mobile/package.json`、`android/app/build.gradle`
       （versionName/versionCode）、`src/version.ts`，并顺带同步 `package-lock.json`

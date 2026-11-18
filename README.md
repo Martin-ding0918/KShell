@@ -2,7 +2,7 @@
 
 **[English](./README.en.md)** ｜ **中文**
 
-![version](https://img.shields.io/github/v/tag/Amwidtf/zshell?label=version&color=blue)
+![version](https://img.shields.io/github/v/release/Martin-ding0918/KShell-public?label=version&color=blue)
 ![platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)
 ![react native](https://img.shields.io/badge/React%20Native-0.82-61DAFB?logo=react)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -21,10 +21,10 @@ Kimi Code 桌面端「远程控制」的手机壳客户端。非官方、开源�
 
 控制台顶栏与主题随系统深色模式自动切换（小米 17 实机截图）。
 
-## 已知问题
+## 下载
 
-- 暂无。0.0.1.10 修复了 0.0.1.9 中「新建会话残留标题栏」的问题：顶栏补丁不再按路由
-  判断，新建会话重建顶栏后会立即重新套用紧凑布局。
+从 [KShell Releases](https://github.com/Martin-ding0918/KShell-public/releases/latest) 下载 ARM64 APK。
+0.0.1.11 修复切换会话时的旧顶栏残留和设置按钮错位；新建会话的欢迎页保留网页原有的项目顶栏。
 
 ## 功能
 
@@ -62,10 +62,10 @@ zshell/                            # npm workspaces monorepo
 npm install                          # 安装全部依赖（含 npm patch）
 npx vitest run                       # core-shell 单元测试
 cd apps/mobile/android
-./gradlew assembleRelease            # 产出可独立运行的 release APK
+./gradlew assemblePublicRelease      # 构建公开 ARM64 APK（需配置正式签名）
 ```
 
-已发布版本在 [Releases](https://github.com/Amwidtf/zshell/releases)，打 tag 自动构建。
+本项目 fork 自 [Amwidtf/zshell](https://github.com/Amwidtf/zshell)；公开安装包单独发布。
 
 ## 多平台路线
 
