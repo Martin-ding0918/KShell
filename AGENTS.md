@@ -6,7 +6,7 @@
 
 - `packages/core-shell` — **零框架依赖**的纯 TS 核心逻辑（配对解析 / endpoint 选择 / 状态机 / 机器注册表 / 应用锁 / 加密原语）。配 vitest 测试。
 - `packages/patch-bundle` — 注入官方页面的行为补丁 JS（导出为字符串）。
-- `apps/mobile` — React Native 0.82 应用（Android 先行，规划 RNOH 鸿蒙 / iOS）。
+- `apps/mobile` — React Native 0.82 应用（Android 先行）。
 - `patches/` — npm `patchedDependencies` 补丁（勿删）。
 - `docs/` — 项目文档（架构 / 构建 / 发版 / 合规 + 法律文本）。
 - `CHANGELOG.md` — 更新日志，Release 说明的数据源。
@@ -32,14 +32,14 @@ adb -s 127.0.0.1:16512 shell am start -n io.github.martinding0918.kshell.debug/c
 
 ## 硬约束（违反会导致构建损坏或合规风险）
 
-1. **core-shell 保持零依赖、严格 TS 子集**：不 import react-native、不使用 `any`、类型显式。这是未来鸿蒙 ArkTS 原生壳直用核心的前提。
+1. **core-shell 保持零依赖、严格 TS 子集**：不 import react-native、不使用 `any`、类型显式。
 2. **patch-bundle 自防护**：每个补丁必须 try/catch 全包裹 + 重入标志（`__zshellPatchApplied`）+ 环境探针（环境已正常则自动停用）。只允许针对**精确字符串**打补丁，禁止大范围覆盖。
 3. **monorepo 路径**：依赖提升到根 `node_modules`。`apps/mobile/android/settings.gradle`（gradle-plugin 提升路径解析）与 `app/build.gradle` 的 `react{}` 三路径（`../../../../node_modules/...`，相对 android/app 解析）勿改回模板默认。
 4. **npm patch**：`patches/rn-gradle-plugin-drop-foojay.patch` 修复 RN 0.82.1 自带 foojay-resolver 0.5.0 与 Gradle 9 的不兼容。重装依赖后用 `grep foojay node_modules/@react-native/gradle-plugin/settings.gradle.kts` 验证补丁生效（应无结果）。
-5. **新增原生依赖前评估两件事**：① Windows 260 字符路径限制（codegen 源路径长的库会在 `.cxx` 构建报 `Filename longer than 260 characters`，先例：react-native-safe-area-context 已因此移除）；② RNOH 适配表覆盖度（鸿蒙路线的前提）。
+5. **新增原生依赖前先评估 Windows 260 字符路径限制**：codegen 源路径长的库会在 `.cxx` 构建报 `Filename longer than 260 characters`，先例：react-native-safe-area-context 已因此移除。
 6. **公开仓库合规**：代码/文档/提交信息中不得出现内部调研路径（`.tmp/...`）、反编译符号名、逆向过程叙述。协议行为用"observed"等中性描述。
 7. **凭据红线**：任何日志、剪贴板、遥测不得接触 `credentials.hash`；存储只经 `SecureKvStore` 端口。
-8. **平台能力只经端口**：生物识别、安全存储等通过 `core-shell/ports.ts` 接口 + 应用侧适配器注入，便于三端替换实现。
+8. **平台能力只经端口**：生物识别、安全存储等通过 `core-shell/ports.ts` 接口 + 应用侧适配器注入，便于替换实现。
 
 ## 构建环境备忘（本机）
 
