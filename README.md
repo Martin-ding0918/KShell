@@ -60,6 +60,8 @@ cd apps/mobile/android
 ./gradlew assemblePublicRelease      # 构建公开 ARM64 APK（需配置正式签名）
 ```
 
+本项目 fork 自 [Amwidtf/zshell](https://github.com/Amwidtf/zshell)；源码与公开安装包均在本仓库维护。
+
 ## 多平台路线
 
 | 平台 | 状态 |
