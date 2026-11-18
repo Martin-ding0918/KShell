@@ -42,12 +42,12 @@ Kimi Code 桌面端「远程控制」的手机壳客户端。非官方、开源�
 ```
 KShell/                            # npm workspaces monorepo
 ├── packages/
-│   ├── core-shell/              # 零框架依赖的纯 TS 核心（ArkTS 兼容）：配对 / 状态机 / 机器注册表 / 应用锁 / 加密
+│   ├── core-shell/              # 零框架依赖的纯 TS 核心：配对 / 状态机 / 机器注册表 / 应用锁 / 加密
 │   └── patch-bundle/            # 注入官方页面的行为补丁
 └── apps/mobile/                 # React Native 0.82 应用（Android 先行）
 ```
 
-一条原则：**逻辑单源**。core-shell 不依赖任何框架，平台能力通过接口注入，将来换壳时逻辑原样带走。展开见[架构设计](./docs/architecture.md)。
+一条原则：**逻辑单源**。core-shell 不依赖任何框架，平台能力通过接口注入。展开见[架构设计](./docs/architecture.md)。
 
 ## 快速开始
 
