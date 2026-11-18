@@ -1,6 +1,6 @@
 # 架构设计
 
-> 本文描述 ZShell 的代码组织与核心设计决策。面向贡献者与 AI 代理，配合根目录 [AGENTS.md](../AGENTS.md) 使用。
+> 本文描述 KShell 的代码组织与核心设计决策。面向贡献者与 AI 代理，配合根目录 [AGENTS.md](../AGENTS.md) 使用。
 
 ## 总体结构
 
@@ -31,11 +31,9 @@ SHA-256/HMAC/PBKDF2/Base64）放在 `packages/core-shell`，**不 import 任何�
 
 ### 2. 壳路线：官方页面是产品主体
 
-ZShell 的 WebView 加载官方控制台（ZCode `/remote/v4`，新版 relay v2 链接仅含
-sid/mid/name/app_version 且需账号登录，官方页面拒绝携带 hash/t 的 URL；Kimi
-Code `code-rc.kimi.com/devices/<id>/`）——中继连接、配对或账号登录、会话桥
-全部由官方页面自身完成。壳的增值全部在页面之外：加密凭据管理、多机管理、应用锁、
-本地通知、移动端缺陷补丁。
+KShell 的 WebView 加载 Kimi Code 官方控制台（`code-rc.kimi.com/devices/<id>/`）——
+中继连接、配对或账号登录、会话桥全部由官方页面自身完成。壳的增值全部在页面之外：
+加密凭据管理、多机管理、应用锁、本地通知、移动端缺陷补丁。
 
 ### 3. patch-bundle 自防护纪律
 
@@ -46,18 +44,21 @@ Code `code-rc.kimi.com/devices/<id>/`）——中继连接、配对或账号登�
 2. **环境探针自退役**——环境本身正常时补丁自动失效（如 matchMedia 已正确上报）；
 3. **只针对精确字符串**——影响面收敛到单一检测点，不做大范围覆盖。
 
-补丁以 JS 字符串形式导出（`packages/patch-bundle`），与宿主框架无关。当前补丁：
-P-1 matchMedia 移动端输入判定（ZCode 控制台）、P-2 relay WebSocket 只读观察器、
-P-3 `AbortSignal.any` polyfill（Kimi Code 登录依赖它，模拟器/容器常见的旧版
-系统 WebView 没有；环境已原生支持时自动不注入）。
+补丁以 JS 字符串形式导出（`packages/patch-bundle`），与宿主框架无关，`buildPatchSource()`
+全量拼接后统一注入。当前补丁：P-1 matchMedia 移动端输入判定、P-2 relay WebSocket
+只读观察器（Kimi 远程控制隧道走 `wss://code-rc.kimi.com|ai`）、P-3
+`AbortSignal.any` polyfill（Kimi Code 登录依赖它，模拟器/容器常见的旧版系统 WebView
+没有）、P-4 `Promise.withResolvers` polyfill（旧 WebView 缺失时会话与工作区列表
+打不开）。P-3/P-4 在环境已原生支持时自动不注入。
 
 此外 `apps/mobile/src/kimiTopbar.ts` 是只在 Kimi Code 控制台注入的**样式补丁**
 （不在 patch-bundle 里，因为它依赖宿主桥的消息名）。补丁将当前的窄屏页头缩为 48px 单行，
 胶囊紧跟标题，设置按钮靠右。新建会话时，空壳和同一控制台内仍挂载的旧页头会收起。
 DOM 观察器监听节点、文字和可见性属性的变化，SPA 路由回调和低频扫描负责补查。
 
-多宿主（ZCode / Kimi Code）差异全部收敛在 core-shell 的配对解析与凭据模型里
-（`HostKind`），壳层 UI、桥接、通知与生命周期管理两宿主共用；Kimi Code 的账号
+历史上的多宿主支持（ZCode / DSH）已随更名 KShell 移除：core-shell 的配对解析
+与凭据模型保留 `HostKind` 历史格式（仅为兼容旧备份数据与既有测试），应用各入口
+（载入旧机器、添加配对、恢复备份）只接受官方 HTTPS Kimi 设备。Kimi Code 的账号
 登录由官方页面在壳内覆盖层完成，登录态（Cookie）由系统 WebView 保管、可在设
 置一键清除。
 
