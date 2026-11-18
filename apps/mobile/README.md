@@ -1,6 +1,6 @@
-# ZShell Mobile（apps/mobile）
+# KShell Mobile（apps/mobile）
 
-ZCode 远程控制手机壳的 React Native 应用。项目总览、架构与合规文档见[仓库根 README](../../README.md)。
+Kimi Code 远程控制手机壳的 React Native 应用。项目总览、架构与合规文档见[仓库根 README](../../README.md)。
 
 ## 常用命令
 
