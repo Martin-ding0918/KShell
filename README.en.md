@@ -21,6 +21,10 @@ Three ways to pair: scan the QR with the camera, paste the link, or pick a QR sc
 
 The console top bar and theme follow the system dark mode (captured on a Xiaomi 17).
 
+Top-bar interactions live in two places: tap the session title to switch sessions, or tap the
+connected-status pill for a menu — back to the client list (ends the current view), downloads,
+and reload.
+
 ## Download
 
 Download the ARM64 APK from [KShell Releases](https://github.com/Martin-ding0918/KShell/releases/latest).
