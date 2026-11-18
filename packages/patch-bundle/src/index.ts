@@ -112,12 +112,14 @@ export const WS_OBSERVER_PATCH_SOURCE = String.raw`(function () {
       var ws = (protocols === undefined)
         ? new NativeWS(url)
         : new NativeWS(url, protocols);
-      // Relay candidates: ZCode relay sockets carry /ws in the path; Kimi Code
-      // remote-control pages tunnel through wss://code-rc.kimi.com|ai hosts.
+      // Relay candidates: ZCode relay sockets carry /ws in the path (or dial
+      // the official console hosts directly); Kimi Code remote-control pages
+      // tunnel through wss://code-rc.kimi.com|ai hosts.
       // Read-only observer — widening the match has no page-visible effect.
       var isRelay = typeof url === 'string' &&
         (url.indexOf('/ws') !== -1 ||
-          /^wss?:\/\/code-rc\.kimi\.(com|ai)\//i.test(url));
+          /^wss?:\/\/code-rc\.kimi\.(com|ai)\//i.test(url) ||
+          /^wss?:\/\/(zcode\.z\.ai|zcode\.chatglm\.site)\//i.test(url));
       if (isRelay) {
         post('ws-open', {});
         ws.addEventListener('open', function () { post('ws-connected', {}); });

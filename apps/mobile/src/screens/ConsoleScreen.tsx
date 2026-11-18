@@ -18,6 +18,7 @@ import {
   ConsoleEvent,
   ConsoleStatus,
   deriveConsoleStatus,
+  hostKindOf,
   hostLabel,
   MachineLoginState,
   MachineRecord,
@@ -27,6 +28,7 @@ import {
 } from '@zshell/core-shell';
 import {buildPatchSource} from '@zshell/patch-bundle';
 import {KIMI_TOPBAR_PATCH} from '../kimiTopbar';
+import {ZCODE_TOPBAR_PATCH} from '../zcodeTopbar';
 import {logDiag} from '../diagnostics';
 import {loadPrefs, notifications} from '../notifications';
 import {makeStyles, Palette, radius, useTheme} from '../theme';
@@ -98,9 +100,17 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   // reload the page. Intentional reloads go through key={reloadKey}.
   const webSource = useMemo(() => ({uri: url}), [url]);
   const isKimi = machine.credentials.kind === 'kimi';
+  const isZcode = hostKindOf(machine.credentials) === 'zcode';
   const [kimiHeaderReady, setKimiHeaderReady] = useState(false);
+  const [zcodeHeaderReady, setZcodeHeaderReady] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
-  const patchSource = useMemo(() => buildPatchSource() + (isKimi ? '\n' + KIMI_TOPBAR_PATCH : ''), [isKimi]);
+  const patchSource = useMemo(
+    () =>
+      buildPatchSource() +
+      (isKimi ? '\n' + KIMI_TOPBAR_PATCH : '') +
+      (isZcode ? '\n' + ZCODE_TOPBAR_PATCH : ''),
+    [isKimi, isZcode],
+  );
   const statusDetails = useMemo(() => statusMeta(status, colors), [status, colors]);
   const pushKimiStatus = useCallback(() => {
     const value = JSON.stringify({
@@ -113,6 +123,29 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   useEffect(() => {
     if (kimiHeaderReady) pushKimiStatus();
   }, [kimiHeaderReady, pushKimiStatus]);
+  // ZCode: the merged topbar's status pill is fed the same way. When the
+  // connection is dead the pill doubles as the reconnect button.
+  const pushZcodeStatus = useCallback(() => {
+    const reconnect = status === 'disconnected' || status === 'kicked';
+    const value = JSON.stringify(
+      reconnect
+        ? {
+            short: '重连',
+            label: `${statusDetails.label}，点按重连`,
+            color: statusDetails.color,
+            reconnect: true,
+          }
+        : {
+            short: statusDetails.short,
+            label: statusDetails.label,
+            color: statusDetails.color,
+          },
+    );
+    webviewRef.current?.injectJavaScript(`window.__zshellUpdateZcodeStatus?.(${value}); true;`);
+  }, [status, statusDetails]);
+  useEffect(() => {
+    if (zcodeHeaderReady) pushZcodeStatus();
+  }, [zcodeHeaderReady, pushZcodeStatus]);
   // Notification ids must not collide across simultaneously-alive console
   // sessions: offset by a stable hash of the machine id.
   const notifyIdBase = useMemo(
@@ -171,6 +204,15 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   // The bridge handler is created once per machine; menu items reach the
   // latest reload through a ref so the callback identity stays stable.
   const reloadRef = useRef<() => void>(() => {});
+  // Web-history back, shared by the system back handler and the merged ZCode
+  // topbar's ‹ button (web back is distinct from back-to-list).
+  const handleWebBack = useCallback(() => {
+    if (canGoBackRef.current && webviewRef.current != null) {
+      webviewRef.current.goBack();
+      return true;
+    }
+    return false;
+  }, []);
   const handleBridgeMessage = useCallback(
     (event: WebViewMessageEvent) => {
       const data = event.nativeEvent.data;
@@ -202,6 +244,30 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           return;
         }
       }
+      if (isZcode && /^(zcode\.z\.ai|zcode\.chatglm\.site)$/.test(authHostOf(event.nativeEvent.url))) {
+        if (data === 'zshell:zcode-header-on' || data === 'zshell:zcode-header-off') {
+          const ready = data === 'zshell:zcode-header-on';
+          setZcodeHeaderReady(ready);
+          if (ready) pushZcodeStatus();
+          return;
+        }
+        if (data === 'zshell:zcode-webback') {
+          handleWebBack();
+          return;
+        }
+        if (data === 'zshell:zcode-back') {
+          onBack();
+          return;
+        }
+        if (data === 'zshell:zcode-downloads') {
+          onOpenDownloads();
+          return;
+        }
+        if (data === 'zshell:zcode-reload') {
+          reloadRef.current();
+          return;
+        }
+      }
       const bridgeEvent = parseConsoleEvent(event.nativeEvent.data);
       if (bridgeEvent == null) {
         return;
@@ -223,12 +289,13 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         return next;
       });
     },
-    [notify, brand, isKimi, foreground, pushKimiStatus, onBack, onOpenDownloads],
+    [notify, brand, isKimi, isZcode, foreground, pushKimiStatus, pushZcodeStatus, handleWebBack, onBack, onOpenDownloads],
   );
 
   const reload = useCallback(() => {
     logDiag('page-reload');
     setKimiHeaderReady(false);
+    setZcodeHeaderReady(false);
     setStatus('connecting');
     setLoadFailed(false);
     setControlsVisible(false);
@@ -289,14 +356,6 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     [machine.credentials.kind, onLoginState],
   );
 
-  const handleWebBack = useCallback(() => {
-    if (canGoBackRef.current && webviewRef.current != null) {
-      webviewRef.current.goBack();
-      return true;
-    }
-    return false;
-  }, []);
-
   const handleOpenWindow = useCallback((event: WebViewOpenWindowEvent) => {
     const target = event.nativeEvent.targetUrl;
     if (typeof target !== 'string' || !target.startsWith('https://')) {
@@ -340,7 +399,13 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         ref={webviewRef}
         source={webSource}
         injectedJavaScriptBeforeContentLoaded={patchSource}
-        injectedJavaScript={isKimi ? KIMI_TOPBAR_PATCH + '\ntrue;' : undefined}
+        injectedJavaScript={
+          isKimi
+            ? KIMI_TOPBAR_PATCH + '\ntrue;'
+            : isZcode
+              ? ZCODE_TOPBAR_PATCH + '\ntrue;'
+              : undefined
+        }
         javaScriptEnabled
         domStorageEnabled
         cacheEnabled={false}
@@ -363,6 +428,12 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
             setAuthWindowUrl(null);
           }
           observeLoginState(url);
+          // ZCode 合并顶栏的 ‹ 需要 canGoBack 决定置灰
+          if (isZcode) {
+            webviewRef.current?.injectJavaScript(
+              `window.__zshellUpdateZcodeNav?.({canGoBack:${nav.canGoBack ? 'true' : 'false'}}); true;`,
+            );
+          }
         }}
         onLoadStart={() => {
           setLoadFailed(false);
@@ -388,7 +459,11 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         )}
       />
 
-      {!isKimi || (kimiHeaderReady && controlsVisible) ? (
+      {(isKimi
+        ? kimiHeaderReady && controlsVisible
+        : isZcode
+          ? !zcodeHeaderReady
+          : true) ? (
       <View style={[styles.consoleFooter, kimiHeaderReady && styles.kimiMenu]}>
         {controlsVisible ? (
           <View style={styles.controlBar}>

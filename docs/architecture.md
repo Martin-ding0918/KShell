@@ -31,7 +31,8 @@ SHA-256/HMAC/PBKDF2/Base64）放在 `packages/core-shell`，**不 import 任何�
 
 ### 2. 壳路线：官方页面是产品主体
 
-KShell 的 WebView 加载 Kimi Code 官方控制台（`code-rc.kimi.com/devices/<id>/`）——
+KShell 的 WebView 加载官方远程控制台——Kimi Code（`code-rc.kimi.com/devices/<id>/`）
+与 ZCode（`zcode.z.ai|zcode.chatglm.site/remote/v3|v4`，relay v2 配对）——
 中继连接、配对或账号登录、会话桥全部由官方页面自身完成。壳的增值全部在页面之外：
 加密凭据管理、多机管理、应用锁、本地通知、移动端缺陷补丁。
 
@@ -46,21 +47,28 @@ KShell 的 WebView 加载 Kimi Code 官方控制台（`code-rc.kimi.com/devices/
 
 补丁以 JS 字符串形式导出（`packages/patch-bundle`），与宿主框架无关，`buildPatchSource()`
 全量拼接后统一注入。当前补丁：P-1 matchMedia 移动端输入判定、P-2 relay WebSocket
-只读观察器（Kimi 远程控制隧道走 `wss://code-rc.kimi.com|ai`）、P-3
+只读观察器（Kimi 远程控制隧道走 `wss://code-rc.kimi.com|ai`，ZCode relay 走
+`zcode.z.ai|zcode.chatglm.site` 或带 `/ws` 的 socket）、P-3
 `AbortSignal.any` polyfill（Kimi Code 登录依赖它，模拟器/容器常见的旧版系统 WebView
 没有）、P-4 `Promise.withResolvers` polyfill（旧 WebView 缺失时会话与工作区列表
 打不开）。P-3/P-4 在环境已原生支持时自动不注入。
 
-此外 `apps/mobile/src/kimiTopbar.ts` 是只在 Kimi Code 控制台注入的**样式补丁**
-（不在 patch-bundle 里，因为它依赖宿主桥的消息名）。补丁将当前的窄屏页头缩为 48px 单行，
-胶囊紧跟标题，设置按钮靠右。新建会话时，空壳和同一控制台内仍挂载的旧页头会收起。
+`apps/mobile/src/kimiTopbar.ts` 与 `apps/mobile/src/zcodeTopbar.ts` 是按宿主注入的
+**样式补丁**（不在 patch-bundle 里，因为它们依赖宿主桥的消息名）。
+kimiTopbar 将 Kimi 窄屏页头缩为 48px 单行，胶囊紧跟标题，设置按钮靠右。
+zcodeTopbar 把 ZCode 会话页原本的四条栏（原生壳条 + 网页 mobile 头部 + 工作区头部）
+合并为一条 48px 单行：`‹网页返回 | 会话标题 | ●连接胶囊 | 侧栏`，连接胶囊是唯一
+菜单入口（断线时直接变「重连」）；锚点只用稳定属性（`data-mobile-page`、
+`data-testid`），原按钮保留原处理器仅改 flex order，工作区头部行收缩为零高隐形盒
+（Radix 弹层仍可从胶囊菜单转发触发）。
+两者任一锚点缺失即整体回退原布局并公告 header-off，原生底部胶囊条随之恢复。
 DOM 观察器监听节点、文字和可见性属性的变化，SPA 路由回调和低频扫描负责补查。
 
-历史上的多宿主支持（ZCode / DSH）已随更名 KShell 移除：core-shell 的配对解析
-与凭据模型保留 `HostKind` 历史格式（仅为兼容旧备份数据与既有测试），应用各入口
-（载入旧机器、添加配对、恢复备份）只接受官方 HTTPS Kimi 设备。Kimi Code 的账号
-登录由官方页面在壳内覆盖层完成，登录态（Cookie）由系统 WebView 保管、可在设
-置一键清除。
+ZCode 支持于 0.0.1.8 移除、0.0.1.12 恢复：配对（扫码/手动链接/备份恢复）与控制台
+回到 core-shell 既有逻辑，入口策略闸门在 `apps/mobile/src/storage.ts` 的
+`acceptsCredentials`（官方 Kimi 设备页 + 官方 ZCode 来源，DSH 仍不接受）。
+Kimi Code 的账号登录由官方页面在壳内覆盖层完成，登录态（Cookie）由系统 WebView
+保管、可在设置一键清除；ZCode 的账号登录由页面自身完成。
 
 ### 4. 自管理导航栈 + 系统返回优先级
 

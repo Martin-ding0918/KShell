@@ -2,9 +2,12 @@ import {MMKVLoader} from 'react-native-mmkv-storage';
 import {
   deserializeLockConfig,
   disabledConfig,
+  hostKindOf,
+  KNOWN_ORIGINS,
   LegalConsent,
   LockConfig,
   MachineRegistry,
+  PairingCredentials,
   SecureKvStore,
   serializeLockConfig,
   STORAGE_KEYS,
@@ -20,10 +23,28 @@ const mmkv = new MMKVLoader()
   .withEncryption()
   .initialize();
 
+/**
+ * Policy gate for every pairing entry point (scan, manual link, backup
+ * restore): official Kimi Code device pages and official ZCode console
+ * origins only. DSH stays out of the app. Legacy ZCode records (kind absent,
+ * restored from old backups) pass through hostKindOf's 'zcode' default.
+ */
+function acceptsCredentials(credentials: PairingCredentials | null): boolean {
+  if (credentials == null) {
+    return false;
+  }
+  if (hostKindOf(credentials) === 'kimi') {
+    return /^https:\/\/code-rc\.kimi\.(com|ai)$/.test(credentials.origin);
+  }
+  if (hostKindOf(credentials) === 'zcode') {
+    const origin = credentials.origin.toLowerCase();
+    return origin === KNOWN_ORIGINS.international || origin === KNOWN_ORIGINS.china;
+  }
+  return false;
+}
+
 const registryOptions: ConstructorParameters<typeof MachineRegistry>[1] = {
-  acceptsCredentials: credentials =>
-    credentials?.kind === 'kimi' &&
-    /^https:\/\/code-rc\.kimi\.(com|ai)$/.test(credentials.origin),
+  acceptsCredentials,
 };
 
 export const secureStore: SecureKvStore = {

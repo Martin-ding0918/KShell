@@ -1,6 +1,6 @@
 {
   "name": "zcode-shell",
-  "version": "0.0.1-fork.11",
+  "version": "0.0.1-fork.15",
   "private": true,
   "engines": {
     "node": ">=22",

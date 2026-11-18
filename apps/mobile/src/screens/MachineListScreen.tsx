@@ -47,10 +47,11 @@ type Row =
   | {type: 'sub'; favorite: boolean}
   | {type: 'machine'; m: MachineRecord};
 
-/** Show Kimi devices, with favorites first. */
+/** Show paired devices grouped by product, favorites first within a group. */
 function buildRows(machines: MachineRecord[]): Row[] {
   const groups: Array<[string, MachineRecord[]]> = [
     ['Kimi Code', machines.filter(m => hostKindOf(m.credentials) === 'kimi')],
+    ['ZCode', machines.filter(m => hostKindOf(m.credentials) === 'zcode')],
   ];
   const rows: Row[] = [];
   for (const [label, group] of groups) {
@@ -129,7 +130,7 @@ export function MachineListScreen(props: MachineListScreenProps) {
           </View>
           <Text style={font.body}>还没有配对的桌面端</Text>
           <Text style={[font.faint, {marginTop: 8, textAlign: 'center'}]}>
-            先在 Kimi Code 桌面端打开「远程控制」，{'\n'}
+            先在 Kimi Code / ZCode 桌面端打开「远程控制」，{'\n'}
             用下方扫码；或者直接粘贴配对链接。
           </Text>
         </ScrollView>
