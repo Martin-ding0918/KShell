@@ -112,6 +112,14 @@ const fixture = function (install, applyTheme) {
     previousText.data = '';
     await frame();
     check(box(old).height === 0 && !pill(), 'reused header collapses when emptied');
+    window.__zshellSetTopbarActive(false);
+    previousText.data = 'Restored session';
+    window.dispatchEvent(new Event('resize'));
+    install();
+    await new Promise(done => setTimeout(done, 1300));
+    check(!pill(), 'hidden header ignores mutations, refresh and the timer');
+    window.__zshellSetTopbarActive(true);
+    check(!!pill(), 'visible header rescans immediately');
     mark('PASS');
   })().catch(error => mark(error.message));
 };

@@ -16,7 +16,7 @@ const LABELS: Record<string, string> = {
   'console-open': '打开控制台',
   'page-load-start': '页面开始加载',
   'page-reload': '手动重连',
-  'auto-reload': '自动重连（回前台）',
+  'auto-reload': '自动重连（显示控制台）',
   'app-active': '回到前台',
   'ws-open': '建立中继连接',
   'ws-connected': '中继已连接',

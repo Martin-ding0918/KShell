@@ -1,5 +1,6 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
+  AppState,
   ScrollView,
   StyleSheet,
   Text,
@@ -22,33 +23,51 @@ import {makeStyles, radius, useTheme} from '../theme';
 /** Second-level page: every download this app uid owns — update APKs and
  * files downloaded from console pages — with live progress from the system
  * download manager. */
-export function DownloadsScreen({onBack}: {onBack: () => void}) {
+export function DownloadsScreen({onBack, visible}: {onBack: () => void; visible: boolean}) {
   const {colors, font} = useTheme();
   const styles = useStyles();
   const [items, setItems] = useState<DownloadItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [appActive, setAppActive] = useState(() => AppState.currentState === 'active');
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const refresh = useCallback(async () => {
-    try {
-      setItems(await queryDownloads());
-      setError(null);
-    } catch {
-      setError('无法读取下载列表，请稍后重试');
-    }
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => setAppActive(state === 'active'));
+    setAppActive(AppState.currentState === 'active');
+    return () => sub.remove();
   }, []);
 
   useEffect(() => {
-    refresh();
-    // Fixed cadence: a cursor query is cheap and this keeps the timer simple.
-    const timer = setInterval(refresh, 1500);
-    return () => clearInterval(timer);
-  }, [refresh]);
+    if (!visible || !appActive) return;
+
+    let disposed = false;
+    let downloading = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = async () => {
+      try {
+        const updated = await queryDownloads();
+        if (disposed) return;
+        downloading = updated.some(item => isActive(item.status));
+        setItems(updated);
+        setError(null);
+      } catch {
+        if (disposed) return;
+        setError('无法读取下载列表');
+      }
+      if (downloading) timer = setTimeout(refresh, 1500);
+    };
+    void refresh();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [appActive, visible, refreshKey]);
 
   const act = (fn: () => Promise<unknown>) => {
     setActionError(null);
     fn()
-      .then(refresh)
+      .then(() => setRefreshKey(key => key + 1))
       .catch(e => {
         setActionError(e instanceof Error && e.message ? e.message : '操作失败');
       });
@@ -98,7 +117,11 @@ export function DownloadsScreen({onBack}: {onBack: () => void}) {
         </View>
       </TouchableOpacity>
 
-      {error != null ? <Text style={styles.errorText}>{error}</Text> : null}
+      {error != null ? (
+        <TouchableOpacity onPress={() => setRefreshKey(key => key + 1)} accessibilityRole="button">
+          <Text style={styles.errorText}>{error}，点按重试</Text>
+        </TouchableOpacity>
+      ) : null}
       {actionError != null ? <Text style={styles.errorText}>{actionError}</Text> : null}
 
       {items != null && items.length === 0 ? (

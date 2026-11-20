@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import type {AppStateStatus} from 'react-native';
 import {
   WebView,
   WebViewNavigation,
@@ -134,6 +135,12 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   const {colors, font} = useTheme();
   const styles = useStyles();
   const webviewRef = useRef<WebView<object>>(null);
+  const syncTopbarActivity = useCallback((active: boolean) => {
+    webviewRef.current?.injectJavaScript(
+      `window.__zshellTopbarActive = ${active}; window.__zshellSetTopbarActive?.(${active}); true;`,
+    );
+  }, []);
+  const [rendererGone, setRendererGone] = useState(false);
   const canGoBackRef = useRef(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [status, setStatus] = useState<ConsoleStatus>('connecting');
@@ -296,6 +303,10 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       const host = authHostOf(event.nativeEvent.url);
       const kimiPage = isKimi && /^code-rc\.kimi\.(com|ai)$/.test(host);
       const zcodeConsole = isZcode && /^(zcode\.z\.ai|zcode\.chatglm\.site)$/.test(host);
+      if ((kimiPage || zcodeConsole) && data === 'zshell:topbar-activity-ready') {
+        syncTopbarActivity(foreground && AppState.currentState === 'active');
+        return;
+      }
       if ((kimiPage || zcodeConsole) && data === 'zshell:first-paint') {
         attempt.current.firstPaintAt ??= performance.now();
         logDiag('first-paint');
@@ -391,11 +402,12 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         return next;
       });
     },
-    [notify, brand, isKimi, isZcode, foreground, pushKimiStatus, pushZcodeStatus, handleWebBack, onBack, onOpenDownloads],
+    [notify, brand, isKimi, isZcode, foreground, pushKimiStatus, pushZcodeStatus, handleWebBack, onBack, onOpenDownloads, syncTopbarActivity],
   );
 
   const reload = useCallback((mode?: 'current-page') => {
     logDiag('page-reload');
+    setRendererGone(false);
     attempt.current = {startedAt: performance.now()};
     setFailureReport('');
     setKimiHeaderReady(false);
@@ -425,24 +437,32 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     logDiag('console-open', machine.name);
   }, [machine.name]);
 
-  // Returning to the foreground with a dead connection or a failed page load
-  // reloads right away — the OS often kills the WebView renderer in the
-  // background, and the resume-time reload can hit a network that is not
-  // ready yet (error -1). Retrying automatically once the app is actually
-  // visible fixes both instead of leaving a dead error page.
+  // Keep hidden sessions mounted for notifications. Recover a failed session
+  // when its console becomes visible in the active app.
   useEffect(() => {
-    const sub = AppState.addEventListener('change', state => {
-      if (state !== 'active') {
-        return;
-      }
-      logDiag('app-active', statusRef.current);
-      if (statusRef.current === 'disconnected' || loadFailedRef.current) {
+    if (!foreground) {
+      syncTopbarActivity(false);
+      return;
+    }
+
+    let active: boolean | undefined;
+    const update = (state: AppStateStatus, fromAppState: boolean) => {
+      const next = state === 'active';
+      if (next === active) return;
+      active = next;
+      syncTopbarActivity(active);
+      if (!active) return;
+
+      if (fromAppState) logDiag('app-active', statusRef.current);
+      if (rendererGone || statusRef.current === 'disconnected' || loadFailedRef.current) {
         logDiag('auto-reload');
         reload();
       }
-    });
+    };
+    const sub = AppState.addEventListener('change', state => update(state, true));
+    update(AppState.currentState, false);
     return () => sub.remove();
-  }, [reload]);
+  }, [foreground, reload, rendererGone, syncTopbarActivity]);
 
   // Kimi Code 登录态观测：页面最终落在 /login = 未登录，留在 /devices/ = 已登录。
   // 注：必须用 onNavigationStateChange——本版本 onLoadEnd 事件在 Android
@@ -519,7 +539,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
 
   return (
     <View style={styles.root}>
-      <WebView<object>
+      {!rendererGone && <WebView<object>
         key={reloadKey}
         ref={webviewRef}
         source={webSource}
@@ -565,12 +585,11 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           setCover('hidden');
           logDiag('load-error', Number.isSafeInteger(code) ? String(code) : undefined);
         }}
-        // The OS may kill the WebView renderer while backgrounded; rebuild
-        // the page instead of leaving a dead surface.
-        onRenderProcessGone={() => reload()}
+        // Dispose of the dead native view even when its console is hidden.
+        onRenderProcessGone={() => setRendererGone(true)}
         onMessage={handleBridgeMessage}
         renderError={() => <View />}
-      />
+      />}
 
       {cover === 'hidden' && !loadFailed && connectionHint && (
         <View style={styles.connectionHint} accessibilityLiveRegion="polite">

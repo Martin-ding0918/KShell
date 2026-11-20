@@ -1,4 +1,5 @@
 import type {ColorScheme} from './theme';
+import {INSTALL_TOPBAR_ACTIVITY} from './topbarActivity.ts';
 
 // Android installs only this marked prelude at true document start.
 export function buildKimiThemePrelude(scheme: ColorScheme, colors: Record<ColorScheme, string>): string {
@@ -56,13 +57,14 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
   'use strict';
   try {
     if (!/^code-rc\.kimi\.(com|ai)$/.test(location.hostname)) return;
-    if (window.__zshellRefreshKimiTopbar) {
-      window.__zshellRefreshKimiTopbar();
-      return;
-    }
     var post = function (event) {
       if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(event);
     };
+    if (window.__zshellRefreshKimiTopbar) {
+      window.__zshellRefreshKimiTopbar();
+      post('zshell:topbar-activity-ready');
+      return;
+    }
     var host = '.app.mobile > .topbar';
     var compact = 'data-zshell-compact';
     var hidden = 'data-zshell-header-hidden';
@@ -206,42 +208,8 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
         post('zshell:kimi-header-on');
       } catch (_) { /* Leave the original controls available. */ }
     };
-    var pending = false;
-    new MutationObserver(function () {
-      if (pending) return;
-      pending = true;
-      requestAnimationFrame(function () { pending = false; scan(); });
-    }).observe(document, {
-      childList:true, characterData:true, subtree:true, attributes:true,
-      attributeFilter:['class', 'hidden', 'aria-hidden', 'style']
-    });
-    window.__zshellRefreshKimiTopbar = function () { scan(true); };
-    // SPA route changes: the page swaps headers without a reload, so a route
-    // change must re-scan even when MutationObserver misses the timing.
-    var route = location.pathname;
-    var onRoute = function () { route = location.pathname; closeMenu(); scan(); };
-    try {
-      var wrap = function (name) {
-        var original = history[name];
-        if (typeof original !== 'function') return;
-        history[name] = function () {
-          var out = original.apply(this, arguments);
-          try { onRoute(); } catch (_) {}
-          return out;
-        };
-      };
-      wrap('pushState');
-      wrap('replaceState');
-    } catch (_) { /* history may be locked down; the timer below covers it */ }
-    window.addEventListener('popstate', onRoute);
-    // Cheap sanity pass: catches a header replaced at the same route without
-    // visible DOM churn, and re-attaches after the page re-renders the bar
-    // from a cached tree (no mutation events observed).
-    setInterval(function () {
-      if (location.pathname !== route) onRoute();
-      else scan();
-    }, 1200);
-    window.addEventListener('resize', function () { scan(); });
-    scan();
+    window.__zshellRefreshKimiTopbar = ${INSTALL_TOPBAR_ACTIVITY}(
+      scan, closeMenu, ['class', 'hidden', 'aria-hidden', 'style']);
+    post('zshell:topbar-activity-ready');
   } catch (_) { /* Leave the original controls available. */ }
 })();`;

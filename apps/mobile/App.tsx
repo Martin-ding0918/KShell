@@ -376,7 +376,7 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
       screen = <PermissionsScreen onBack={pop} />;
       break;
     case 'downloads':
-      screen = <DownloadsScreen onBack={pop} />;
+      screen = <DownloadsScreen onBack={pop} visible={!booting && consented && unlocked} />;
       break;
     case 'datamanage':
       screen = <DataManageScreen machines={machines} lock={lock} onBack={pop} />;
@@ -446,7 +446,7 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
         {screen}
         {fromConsole ? (
           <View style={styles.overlay}>
-            <DownloadsScreen onBack={pop} />
+            <DownloadsScreen onBack={pop} visible={!booting && consented && unlocked} />
           </View>
         ) : null}
       </View>

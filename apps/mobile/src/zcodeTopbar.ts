@@ -1,4 +1,5 @@
 import type {ConsoleStatus} from '@zshell/core-shell';
+import {INSTALL_TOPBAR_ACTIVITY} from './topbarActivity.ts';
 
 export type ZcodePage = 'other' | 'home' | 'chat';
 
@@ -37,13 +38,14 @@ export const ZCODE_TOPBAR_PATCH = String.raw`(function () {
   'use strict';
   try {
     if (!/^(zcode\.z\.ai|zcode\.chatglm\.site)$/.test(location.hostname)) return;
-    if (window.__zshellRefreshZcodeTopbar) {
-      window.__zshellRefreshZcodeTopbar();
-      return;
-    }
     var post = function (event) {
       if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(event);
     };
+    if (window.__zshellRefreshZcodeTopbar) {
+      window.__zshellRefreshZcodeTopbar();
+      post('zshell:topbar-activity-ready');
+      return;
+    }
     var chatSection = 'section[data-mobile-page="chat"]';
     var wsHeader = 'header[data-testid="workspace-header"]';
     var wsTitle = '[data-testid="workspace-title"]';
@@ -324,42 +326,8 @@ export const ZCODE_TOPBAR_PATCH = String.raw`(function () {
         post('zshell:zcode-header-on');
       } catch (_) { /* Leave the original controls available. */ }
     };
-    var pending = false;
-    new MutationObserver(function () {
-      if (pending) return;
-      pending = true;
-      requestAnimationFrame(function () { pending = false; scan(); });
-    }).observe(document, {
-      childList:true, characterData:true, subtree:true, attributes:true,
-      attributeFilter:['class', 'hidden', 'aria-hidden', 'style', 'data-testid']
-    });
-    window.__zshellRefreshZcodeTopbar = function () { scan(true); };
-    // SPA route changes (home <-> chat uses history state) must re-scan even
-    // when the MutationObserver misses the timing.
-    var route = location.pathname;
-    var onRoute = function () { route = location.pathname; closeMenu(); scan(); };
-    try {
-      var wrap = function (name) {
-        var original = history[name];
-        if (typeof original !== 'function') return;
-        history[name] = function () {
-          var out = original.apply(this, arguments);
-          try { onRoute(); } catch (_) {}
-          return out;
-        };
-      };
-      wrap('pushState');
-      wrap('replaceState');
-    } catch (_) { /* history may be locked down; the timer below covers it */ }
-    window.addEventListener('popstate', onRoute);
-    // Cheap sanity pass: catches a header replaced at the same route without
-    // visible DOM churn, and re-attaches after the page re-renders the bar
-    // from a cached tree (no mutation events observed).
-    setInterval(function () {
-      if (location.pathname !== route) onRoute();
-      else scan();
-    }, 1200);
-    window.addEventListener('resize', function () { scan(); });
-    scan();
+    window.__zshellRefreshZcodeTopbar = ${INSTALL_TOPBAR_ACTIVITY}(
+      scan, closeMenu, ['class', 'hidden', 'aria-hidden', 'style', 'data-testid']);
+    post('zshell:topbar-activity-ready');
   } catch (_) { /* Leave the original controls available. */ }
 })();`;
