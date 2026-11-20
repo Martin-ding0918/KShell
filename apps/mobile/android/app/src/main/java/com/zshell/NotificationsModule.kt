@@ -2,7 +2,9 @@ package com.zshell
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.facebook.react.bridge.Promise
@@ -42,11 +44,18 @@ class NotificationsModule(private val reactContext: ReactApplicationContext) :
       if (!nm.areNotificationsEnabled()) {
         return
       }
+      val openApp = PendingIntent.getActivity(
+          reactContext, 0,
+          Intent(reactContext, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+          },
+          PendingIntent.FLAG_IMMUTABLE)
       val notification =
           NotificationCompat.Builder(reactContext, CHANNEL_ID)
               .setSmallIcon(android.R.drawable.stat_notify_chat)
               .setContentTitle(title)
               .setContentText(body)
+              .setContentIntent(openApp)
               .setStyle(NotificationCompat.BigTextStyle().bigText(body))
               .setAutoCancel(true)
               .build()

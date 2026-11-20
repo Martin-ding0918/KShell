@@ -10,7 +10,7 @@ KShell/                            # npm workspaces monorepo
 │   ├── core-shell/              # 零框架依赖的纯 TS 核心
 │   └── patch-bundle/            # 注入官方页面的行为补丁
 ├── apps/
-│   └── mobile/                  # React Native 应用（Android 先行）
+│   └── mobile/                  # React Native 应用（仅 Android）
 └── patches/                     # npm patchedDependencies 补丁
 ```
 

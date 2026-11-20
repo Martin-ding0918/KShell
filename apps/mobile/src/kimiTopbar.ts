@@ -1,3 +1,50 @@
+import type {ColorScheme} from './theme';
+
+// Android installs only this marked prelude at true document start.
+export function buildKimiThemePrelude(scheme: ColorScheme, colors: Record<ColorScheme, string>): string {
+  if (!Object.values(colors).every(color => /^#[0-9a-f]{6}$/i.test(color))) return '';
+  return String.raw`// kshell-kimi-document-theme:${colors[scheme]}
+(function () {
+  'use strict';
+  try {
+    if (window.top !== window || !/^code-rc\.kimi\.(com|ai)$/.test(location.hostname) ||
+        location.protocol !== 'https:' || !location.pathname.startsWith('/devices/')) return;
+    var apply = function () {
+      var root = document.documentElement;
+      if (!root || !document.head) return false;
+      if (document.getElementById('kshell-kimi-document-theme')) return true;
+      if (root.getAttribute('data-color-scheme') !== 'system') return true;
+      var stored;
+      try { stored = localStorage.getItem('kimi-web.color-scheme'); } catch (_) {}
+      var explicit = stored === 'light' || stored === 'dark';
+      if (explicit) root.setAttribute('data-color-scheme', stored);
+      var scheme = explicit ? stored : ${JSON.stringify(scheme)};
+      var background = ${JSON.stringify(colors)}[scheme];
+      var style = document.createElement('style');
+      style.id = 'kshell-kimi-document-theme';
+      // The official stylesheet and later user theme changes retain priority.
+      style.textContent = ':where(html){color-scheme:' + scheme +
+        ';background-color:var(--color-bg,' + background + ')}';
+      document.head.appendChild(style);
+      // Diagnostic: proves on-device that the document-start pin actually ran
+      // (visible in the diag timeline; every earlier fix shipped unverifiable).
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage('zshell:kimi-theme:' + scheme);
+      }
+      return true;
+    };
+    if (apply()) return;
+    var observer = new MutationObserver(function () {
+      if (apply()) observer.disconnect();
+    });
+    observer.observe(document, {childList: true, subtree: true});
+    window.addEventListener('DOMContentLoaded', function () { observer.disconnect(); }, {once: true});
+  } catch (_) { /* Keep the official theme initialization as the fallback. */ }
+})();
+// kshell-kimi-theme-end
+`;
+}
+
 // Compact Kimi Code console topbar.
 //
 // Session transitions can leave an empty header or mount its replacement

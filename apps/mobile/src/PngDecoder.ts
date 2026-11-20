@@ -1,4 +1,4 @@
-import {inflate} from 'pako';
+import {Inflate} from 'pako';
 
 /**
  * Minimal dependency-free PNG decoder for QR screenshots: 8-bit depth,
@@ -11,6 +11,8 @@ export interface RgbaImage {
   height: number;
   rgba: Uint8ClampedArray;
 }
+
+export const MAX_QR_IMAGE_PIXELS = 1600 * 1600;
 
 const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -42,7 +44,7 @@ export function decodePng(bytes: Uint8Array): RgbaImage | null {
   let colorType = -1;
   let palette: Uint8Array | null = null;
   let trns: Uint8Array | null = null;
-  const idat: number[] = [];
+  const idat: Uint8Array[] = [];
 
   while (pos + 8 <= bytes.length) {
     const len =
@@ -53,12 +55,15 @@ export function decodePng(bytes: Uint8Array): RgbaImage | null {
       bytes[pos + 6],
       bytes[pos + 7],
     );
+    if (len > bytes.length - pos - 12) return null;
     const data = bytes.subarray(pos + 8, pos + 8 + len);
     if (type === 'IHDR') {
+      if (pos !== 8 || len !== 13) return null;
       width =
         ((data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3]) >>> 0;
       height =
         ((data[4] << 24) | (data[5] << 16) | (data[6] << 8) | data[7]) >>> 0;
+      if (width === 0 || height === 0 || width * height > MAX_QR_IMAGE_PIXELS) return null;
       const bitDepth = data[8];
       colorType = data[9];
       const interlace = data[12];
@@ -70,9 +75,7 @@ export function decodePng(bytes: Uint8Array): RgbaImage | null {
     } else if (type === 'tRNS') {
       trns = data.slice();
     } else if (type === 'IDAT') {
-      for (let i = 0; i < data.length; i++) {
-        idat.push(data[i]);
-      }
+      if (data.length > 0) idat.push(data);
     } else if (type === 'IEND') {
       break;
     }
@@ -87,21 +90,29 @@ export function decodePng(bytes: Uint8Array): RgbaImage | null {
 
   const channels = CHANNELS[colorType];
   const bpp = channels;
-  let raw: Uint8Array;
-  try {
-    raw = inflate(new Uint8Array(idat));
-  } catch {
-    return null;
-  }
   const stride = width * channels;
-  if (raw.length < height * (stride + 1)) {
+  const raw = new Uint8Array(height * (stride + 1));
+  let written = 0;
+  try {
+    const inflater = new Inflate({windowBits: 15});
+    inflater.onData = chunk => {
+      if (typeof chunk === 'string' || chunk.length > raw.length - written) {
+        throw new Error('PNG exceeds declared size');
+      }
+      raw.set(chunk, written);
+      written += chunk.length;
+    };
+    for (let i = 0; i < idat.length; i++) {
+      if (inflater.ended || !inflater.push(idat[i], i === idat.length - 1)) return null;
+    }
+    if (!inflater.ended || inflater.err || written !== raw.length) return null;
+  } catch {
     return null;
   }
 
   // Unfilter scanlines into recon (row-major pixels, channels each).
   const recon = new Uint8Array(height * stride);
   let src = 0;
-  let prev = 0;
   for (let y = 0; y < height; y++) {
     const filter = raw[src++];
     const rowStart = y * stride;
@@ -134,9 +145,7 @@ export function decodePng(bytes: Uint8Array): RgbaImage | null {
       recon[rowStart + x] = value & 0xff;
     }
     src += stride;
-    prev = rowStart;
   }
-  void prev;
 
   const rgba = new Uint8ClampedArray(width * height * 4);
   for (let p = 0; p < width * height; p++) {

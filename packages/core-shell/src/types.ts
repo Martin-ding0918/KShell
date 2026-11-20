@@ -42,8 +42,7 @@ export interface PairingCredentials {
   issuedAt: number | null;
   /**
    * Product family this machine belongs to; absent means 'zcode' (records
-   * stored before multi-host support). 'kimi' = Kimi Code remote control,
-   * 'dsh' = DSH (DeepSeek Harness) self-hosted remote workbench.
+   * stored before multi-host support).
    */
   kind?: HostKind;
   /**
@@ -59,9 +58,5 @@ export interface PairingCredentials {
   extraQuery?: string | null;
 }
 
-/**
- * Which desktop product a pairing belongs to. 'dsh' carries no secret —
- * the address itself (self-hosted LAN IP or tunnel domain) is the machine
- * identity; any access gate is handled inside the page.
- */
-export type HostKind = 'zcode' | 'kimi' | 'dsh';
+/** Which desktop product a pairing belongs to. */
+export type HostKind = 'zcode' | 'kimi';

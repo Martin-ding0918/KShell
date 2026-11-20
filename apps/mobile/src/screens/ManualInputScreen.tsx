@@ -25,9 +25,9 @@ interface ManualInputScreenProps {
 const REASON_TEXT: Record<string, string> = {
   empty: '请粘贴配对 URL',
   'invalid-url': '不是有效的 URL，请完整复制桌面端二维码对应的链接',
-  'not-https': 'Kimi Code 仅支持 HTTPS',
-  'missing-sid': '无法识别：Kimi Code 需 /devices/… 路径',
-  'unsupported-host': '此版本仅支持 Kimi Code',
+  'not-https': '配对链接仅支持 HTTPS',
+  'missing-sid': '无法识别：Kimi Code 链接需 /devices/… 路径，ZCode 链接需 sid 参数',
+  'unsupported-host': '此版本仅支持官方 Kimi Code / ZCode 来源',
   'invalid-device-path': '不是有效的 Kimi Code 设备链接（/devices/…）',
 };
 
@@ -54,7 +54,7 @@ export function ManualInputScreen({onSubmit, onDone}: ManualInputScreenProps) {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={font.dim}>
           粘贴桌面端「远程控制」生成的配对链接（与二维码内容相同），
-          {'\n'}仅支持 Kimi Code：
+          {'\n'}支持 Kimi Code 与 ZCode：
         </Text>
         <TextInput
           style={styles.urlInput}
@@ -84,6 +84,7 @@ export function ManualInputScreen({onSubmit, onDone}: ManualInputScreenProps) {
         </TouchableOpacity>
         <Text style={[font.faint, {marginTop: 16}]}>
           Kimi Code 格式：https://code-rc.kimi.com/devices/&lt;设备ID&gt;/{'\n'}
+          ZCode 格式：https://zcode.z.ai/remote/v4?sid=…&amp;mid=…{'\n'}
           （桌面端二维码弹窗均可复制链接）
         </Text>
       </ScrollView>

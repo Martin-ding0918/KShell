@@ -128,56 +128,11 @@ describe('parsePairingUrl', () => {
   });
 });
 
-describe('parsePairingUrl · DSH', () => {
-  it('parses a bare LAN origin (mobile-remote plugin QR shape)', () => {
-    const r = parsePairingUrl('http://192.168.1.5:3080');
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.credentials.kind).toBe('dsh');
-    expect(r.credentials.sid).toBe('192.168.1.5:3080');
-    expect(r.credentials.origin).toBe('http://192.168.1.5:3080');
-    expect(r.credentials.hash).toBe('');
-    expect(r.credentials.extraQuery).toBeNull();
-  });
-
-  it('parses a bare https tunnel origin, preserving the query', () => {
-    const r = parsePairingUrl('https://dsh.example.top/?src=qr');
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.credentials.kind).toBe('dsh');
-    expect(r.credentials.origin).toBe('https://dsh.example.top');
-    expect(r.credentials.extraQuery).toBe('src=qr');
-  });
-
-  it('treats an explicit trailing slash root as the same machine', () => {
-    const a = parsePairingUrl('http://10.66.66.1:3080');
-    const b = parsePairingUrl('http://10.66.66.1:3080/');
-    expect(a.ok && b.ok).toBe(true);
-    if (!a.ok || !b.ok) return;
-    expect(a.credentials.sid).toBe(b.credentials.sid);
-    expect(a.credentials.origin).toBe(b.credentials.origin);
-  });
-
-  it('rejects http URLs with a path (not a DSH address; cleartext risk)', () => {
-    expect(parsePairingUrl('http://example.com/some/path')).toEqual({
-      ok: false,
-      reason: 'not-https',
-    });
-  });
-
-  it('rejects a bare known ZCode origin as a truncated ZCode link', () => {
-    expect(parsePairingUrl('https://zcode.z.ai/')).toEqual({
-      ok: false,
-      reason: 'missing-sid',
-    });
-    expect(parsePairingUrl('https://zcode.chatglm.site')).toEqual({
-      ok: false,
-      reason: 'missing-sid',
-    });
-    expect(parsePairingUrl('http://zcode.z.ai')).toEqual({
-      ok: false,
-      reason: 'missing-sid',
-    });
+describe('retired DSH addresses', () => {
+  it('rejects bare LAN and tunnel addresses', () => {
+    expect(parsePairingUrl('http://192.168.1.5:3080')).toEqual({ok: false, reason: 'not-https'});
+    expect(parsePairingUrl('https://dsh.example.top/?src=qr')).toEqual({ok: false, reason: 'missing-sid'});
+    expect(parsePairingUrl('https://zcode.z.ai/')).toEqual({ok: false, reason: 'missing-sid'});
   });
 });
 
@@ -210,13 +165,6 @@ describe('hostLabel / hostKindOf', () => {
     expect(hostKindOf(noSource.credentials)).toBe('kimi');
   });
 
-  it('labels dsh', () => {
-    const dsh = parsePairingUrl('http://192.168.1.5:3080');
-    if (!dsh.ok) throw new Error('fixture must parse');
-    expect(hostLabel(dsh.credentials)).toBe('DSH');
-    expect(hostKindOf(dsh.credentials)).toBe('dsh');
-    expect(sourceShortLabel(dsh.credentials)).toBe('');
-  });
 });
 
 describe('consolePathFor', () => {
@@ -298,21 +246,6 @@ describe('buildConsoleUrl', () => {
     expect(buildConsoleUrl(kimi.credentials)).toBe('https://code-rc.kimi.ai/devices/abc123/');
   });
 
-  it('rebuilds a DSH console URL at the origin root and round-trips', () => {
-    const dsh = parsePairingUrl('http://192.168.1.5:3080');
-    if (!dsh.ok) throw new Error('fixture must parse');
-    expect(buildConsoleUrl(dsh.credentials)).toBe('http://192.168.1.5:3080/');
-
-    const again = parsePairingUrl(buildConsoleUrl(dsh.credentials));
-    expect(again.ok).toBe(true);
-    if (!again.ok) return;
-    expect(again.credentials.kind).toBe('dsh');
-    expect(again.credentials.sid).toBe(dsh.credentials.sid);
-
-    const tunnel = parsePairingUrl('https://dsh.example.top/?src=qr');
-    if (!tunnel.ok) throw new Error('fixture must parse');
-    expect(buildConsoleUrl(tunnel.credentials)).toBe('https://dsh.example.top/?src=qr');
-  });
 });
 
 describe('sourceShortLabel', () => {

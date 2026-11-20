@@ -1,6 +1,7 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {
   AppState,
+  BackHandler,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -8,11 +9,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {activeSecrets, LockConfig, patternToString} from '@zshell/core-shell';
+import {activeSecrets, LockConfig, patternToString, recordLockFailure} from '@zshell/core-shell';
 import {biometricAuth} from '../biometric';
 import {SecretInput} from '../components/SecretInput';
 import {verifySecretAsync} from '../securekdf';
 import {PatternPad} from '../PatternPad';
+import {clearLockAttempts, loadLockAttempts, saveLockAttempts} from '../storage';
 import {makeStyles, radius, useTheme} from '../theme';
 
 type SecretKind = 'pattern' | 'password';
@@ -51,7 +53,33 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
   );
   const [secretInput, setSecretInput] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [attempts, setAttempts] = useState(0);
+  const [attempts, setAttempts] = useState(loadLockAttempts);
+  const [now, setNow] = useState(Date.now);
+  const [verifying, setVerifying] = useState(false);
+  const pending = useRef(false);
+  const mounted = useRef(true);
+  const remaining = Math.max(0, Math.ceil((attempts.retryAt - now) / 1000));
+
+  useEffect(() => {
+    mounted.current = true;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
+    return () => {
+      mounted.current = false;
+      sub.remove();
+    };
+  }, []);
+
+  const coolingDown = remaining > 0;
+  useEffect(() => {
+    if (!coolingDown) return;
+    const timer = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [coolingDown]);
+
+  const unlock = () => {
+    clearLockAttempts();
+    onUnlock();
+  };
   const [bioType, setBioType] = useState<string | undefined>(undefined);
 
   // Auto biometric prompt. Deferred until the app is actually in the
@@ -86,7 +114,7 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
         return;
       }
       if (ok) {
-        onUnlock();
+        unlock();
       } else {
         setError(`${biometricLabel(r.type)}验证未通过`);
         if (secrets.length > 0) {
@@ -94,12 +122,13 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
         }
       }
     };
-    if (AppState.currentState === 'active') {
-      promptOnce();
-    }
+    const startPrompt = () => promptOnce().catch(() => {
+      if (!cancelled) setError('生物识别暂不可用');
+    });
+    if (AppState.currentState === 'active') startPrompt();
     const sub = AppState.addEventListener('change', state => {
       if (state === 'active') {
-        promptOnce();
+        startPrompt();
       }
     });
     return () => {
@@ -109,15 +138,31 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const trySecret = (kind: SecretKind, secret: string) => {
-    verifySecretAsync(secret, kind, config).then(ok => {
+  const trySecret = async (kind: SecretKind, secret: string) => {
+    if (pending.current || attempts.retryAt > Date.now() || !secret) return;
+    pending.current = true;
+    setVerifying(true);
+    setError(null);
+    try {
+      const ok = await verifySecretAsync(secret, kind, config);
+      if (!mounted.current) return;
       if (ok) {
-        onUnlock();
+        if (AppState.currentState === 'active') unlock();
       } else {
+        const time = Date.now();
+        const next = recordLockFailure(attempts, time);
+        setAttempts(next);
+        setNow(time);
+        setSecretInput('');
+        saveLockAttempts(next);
         setError('验证失败，请重试');
-        setAttempts(a => a + 1);
       }
-    });
+    } catch {
+      if (mounted.current) setError('验证暂不可用，请重试');
+    } finally {
+      pending.current = false;
+      if (mounted.current) setVerifying(false);
+    }
   };
 
   const switchTo = (kind: Mode) => {
@@ -149,14 +194,17 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
             style={styles.button}
             onPress={async () => {
               setError(null);
-              const ok = await biometricAuth.prompt('验证身份以打开 KShell');
-              if (ok) {
-                onUnlock();
-              } else {
-                setError(`${biometricLabel(bioType)}验证未通过`);
-                if (secrets.length > 0) {
-                  setMode(secrets[0]);
+              try {
+                const ok = await biometricAuth.prompt('验证身份以打开 KShell');
+                if (!mounted.current) return;
+                if (ok) {
+                  unlock();
+                } else {
+                  setError(`${biometricLabel(bioType)}验证未通过`);
+                  if (secrets.length > 0) setMode(secrets[0]);
                 }
+              } catch {
+                if (mounted.current) setError('生物识别暂不可用');
               }
             }}>
             <Text style={styles.buttonText}>
@@ -169,7 +217,7 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
       {mode === 'pattern' ? (
         <View style={{marginTop: 40, alignItems: 'center'}}>
           <PatternPad
-            hint={error ?? '至少连接 4 个点'}
+            hint={remaining > 0 ? `请等待 ${remaining} 秒` : error ?? '至少连接 4 个点'}
             onComplete={dots => trySecret('pattern', patternToString(dots))}
           />
         </View>
@@ -182,12 +230,14 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
           <SecretInput
             placeholder="密码"
             autoFocus
+            editable={!verifying && remaining === 0}
             value={secretInput}
             onChangeText={setSecretInput}
             onSubmitEditing={() => trySecret('password', secretInput)}
           />
           <TouchableOpacity
             style={styles.button}
+            disabled={verifying || remaining > 0}
             onPress={() => trySecret('password', secretInput)}>
             <Text style={styles.buttonText}>解锁</Text>
           </TouchableOpacity>
@@ -224,8 +274,8 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
       {error != null ? (
         <Text style={styles.error}>{error}</Text>
       ) : null}
-      {attempts > 0 ? (
-        <Text style={styles.error}>已尝试 {attempts} 次</Text>
+      {remaining > 0 ? (
+        <Text style={styles.error}>请等待 {remaining} 秒后重试</Text>
       ) : null}
     </ScrollView>
   );

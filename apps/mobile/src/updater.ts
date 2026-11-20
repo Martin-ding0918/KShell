@@ -1,15 +1,9 @@
-import {
-  parseLatestRelease,
-  pickLatestRelease,
-  ReleaseInfo,
-} from '@zshell/core-shell';
+import {parseLatestRelease, ReleaseInfo} from '@zshell/core-shell';
 
 const REPOSITORY = 'Martin-ding0918/KShell';
 const RELEASES = `https://api.github.com/repos/${REPOSITORY}/releases`;
 const ARM64_ONLY = ['arm64-v8a'];
 export const PROJECT_PAGE = `https://github.com/${REPOSITORY}`;
-
-export type UpdateChannel = 'stable' | 'beta';
 
 async function getJson(url: string): Promise<unknown | null> {
   try {
@@ -30,15 +24,9 @@ async function getJson(url: string): Promise<unknown | null> {
 }
 
 /**
- * Latest usable release for a channel. Stable reads `releases/latest`
- * (GitHub excludes pre-releases there); beta reads the release list, which
- * includes them, and picks the highest version.
+ * Latest usable release: reads `releases/latest` (GitHub excludes
+ * pre-releases there), so every install follows the stable channel.
  */
-export async function fetchLatestRelease(
-  channel: UpdateChannel = 'stable',
-): Promise<ReleaseInfo | null> {
-  if (channel === 'beta') {
-    return pickLatestRelease(await getJson(`${RELEASES}?per_page=15`), ARM64_ONLY, true);
-  }
+export async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
   return parseLatestRelease(await getJson(`${RELEASES}/latest`), ARM64_ONLY, true);
 }

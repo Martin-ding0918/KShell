@@ -147,14 +147,15 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
     }
     cleanupInstalledApks();
     const prefs = loadPrefs();
-    if (!prefs.autoCheckUpdates || notifications == null) {
+    const notifier = notifications;
+    if (!prefs.autoCheckUpdates || notifier == null) {
       return;
     }
     let cancelled = false;
-    fetchLatestRelease(loadPrefs().updateChannel)
+    fetchLatestRelease()
       .then(release => {
         if (!cancelled && release != null && isNewer(APP_VERSION, release)) {
-          notifications.notify(
+          notifier.notify(
             5,
             'KShell 发现新版本',
             `v${release.version} 已发布，到 设置 → 更新 安装`,
@@ -172,6 +173,7 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
   // to the default (exit) behavior.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!unlocked || !consented) return true;
       if (stack.length > 0 && stack[stack.length - 1].name === 'console') {
         if (webBackRef.current != null && webBackRef.current()) {
           return true;
@@ -184,7 +186,7 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
       return false;
     });
     return () => sub.remove();
-  }, [stack]);
+  }, [stack, unlocked, consented]);
 
   const persist = useCallback(() => {
     if (registryRef.current != null) {
@@ -273,6 +275,38 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
     setStack([{name: 'list'}, {name: 'console', machineId}]);
   };
 
+  const renderMachineList = () => (
+    <MachineListScreen
+      machines={machines}
+      onConnect={connectTo}
+      onScan={() => push({name: 'scan'})}
+      onManual={() => push({name: 'manual'})}
+      onSettings={() => push({name: 'settings'})}
+      onRename={(id, name) => {
+        registryRef.current?.rename(id, name);
+        persist();
+      }}
+      onToggleFavorite={id => {
+        registryRef.current?.toggleFavorite(id);
+        persist();
+      }}
+      onMove={(id, dir) => {
+        registryRef.current?.move(id, dir);
+        persist();
+      }}
+      onSetMuted={(id, muted) => {
+        registryRef.current?.setMuted(id, muted);
+        persist();
+      }}
+      onDelete={id => {
+        registryRef.current?.remove(id);
+        persist();
+        removeConsoleSession(id);
+      }}
+      onSignOutWebLogin={signOutWebLogin}
+    />
+  );
+
   let screen: React.JSX.Element | null;
   switch (base.name) {
     case 'scan':
@@ -355,71 +389,11 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
       // this case only guards against a stale stack entry whose machine has
       // vanished (e.g. restored backup) by falling back to the list.
       const machine = registryRef.current?.get(base.machineId) ?? null;
-      screen = machine ? null : (
-        <MachineListScreen
-          machines={machines}
-          onConnect={connectTo}
-          onScan={() => push({name: 'scan'})}
-          onManual={() => push({name: 'manual'})}
-          onSettings={() => push({name: 'settings'})}
-          onRename={(id, name) => {
-            registryRef.current?.rename(id, name);
-            persist();
-          }}
-          onToggleFavorite={id => {
-            registryRef.current?.toggleFavorite(id);
-            persist();
-          }}
-          onMove={(id, dir) => {
-            registryRef.current?.move(id, dir);
-            persist();
-          }}
-          onSetMuted={(id, muted) => {
-            registryRef.current?.setMuted(id, muted);
-            persist();
-          }}
-          onDelete={id => {
-            registryRef.current?.remove(id);
-            persist();
-            removeConsoleSession(id);
-          }}
-          onSignOutWebLogin={signOutWebLogin}
-        />
-      );
+      screen = machine ? null : renderMachineList();
       break;
     }
     default:
-      screen = (
-        <MachineListScreen
-          machines={machines}
-          onConnect={connectTo}
-          onScan={() => push({name: 'scan'})}
-          onManual={() => push({name: 'manual'})}
-          onSettings={() => push({name: 'settings'})}
-          onRename={(id, name) => {
-            registryRef.current?.rename(id, name);
-            persist();
-          }}
-          onToggleFavorite={id => {
-            registryRef.current?.toggleFavorite(id);
-            persist();
-          }}
-          onMove={(id, dir) => {
-            registryRef.current?.move(id, dir);
-            persist();
-          }}
-          onSetMuted={(id, muted) => {
-            registryRef.current?.setMuted(id, muted);
-            persist();
-          }}
-          onDelete={id => {
-            registryRef.current?.remove(id);
-            persist();
-            removeConsoleSession(id);
-          }}
-          onSignOutWebLogin={signOutWebLogin}
-        />
-      );
+      screen = renderMachineList();
   }
 
   // The console shown on top of the stack — or the one sitting under the

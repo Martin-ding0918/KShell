@@ -1,6 +1,7 @@
 package com.zshell
 
 import android.app.DownloadManager
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -211,56 +212,31 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
           .setAllowedOverMetered(true)
           .setAllowedOverRoaming(true)
 
-  /**
-   * Continue a paused download. DownloadManager has no public resume API,
-   * so the entry is re-enqueued from the original URL (our metadata first,
-   * the download's own COLUMN_URI otherwise), yielding a new id.
-   */
+  /** Restart an app-enqueued download. WebView downloads are left to
+   * DownloadManager so it keeps their destination, partial data and headers. */
   @ReactMethod
   fun resumeDownload(id: Double, promise: Promise) {
     val lid = id.toLong()
-    var cursorUri: String? = null
-    var paused = false
+    val meta = loadMeta().firstOrNull { it.id == lid && it.url.isNotEmpty() }
+    if (meta == null) {
+      promise.reject("RESUME", "控制台文件由系统自动续传；如失败，请回到网页重新下载")
+      return
+    }
     try {
-      val cursor = dm.query(DownloadManager.Query().setFilterById(lid))
-      if (cursor.moveToFirst()) {
-        val uriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_URI)
-        if (uriIdx >= 0) {
-          cursorUri = cursor.getString(uriIdx)
-        }
-        val stIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-        paused = stIdx >= 0 && cursor.getInt(stIdx) == DownloadManager.STATUS_PAUSED
+      val paused = dm.query(DownloadManager.Query().setFilterById(lid))?.use { cursor ->
+        cursor.moveToFirst() && cursor.getInt(
+            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) == DownloadManager.STATUS_PAUSED
+      } == true
+      if (!paused) {
+        promise.reject("RESUME", "仅暂停中的下载可以继续")
+        return
       }
-      cursor.close()
-    } catch (e: Exception) {
-      promise.reject("RESUME", "无法读取该下载", e)
-      return
-    }
-    val meta = loadMeta().firstOrNull { it.id == lid }
-    val url = meta?.url?.takeIf { it.isNotEmpty() } ?: cursorUri
-    if (!paused) {
-      promise.reject("RESUME", "仅暂停中的下载可以继续")
-      return
-    }
-    if (url.isNullOrEmpty()) {
-      promise.reject("RESUME", "该下载无法继续，请删除后重试")
-      return
-    }
-    val safeName =
-        meta?.fileName?.takeIf { it.isNotEmpty() }
-            ?: sanitizeFileName(url.substringAfterLast('/').ifEmpty { "download" })
-    val kind = meta?.kind ?: KIND_FILE
-    try {
+      val request = buildRequest(Uri.parse(meta.url), meta.fileName, meta.kind)
       dm.remove(lid)
-      val newId = dm.enqueue(buildRequest(Uri.parse(url), safeName, kind))
+      val newId = dm.enqueue(request)
       saveMeta(
           loadMeta().filterNot { it.id == lid } +
-              DownloadMeta(
-                  id = newId,
-                  fileName = safeName,
-                  url = url,
-                  kind = kind,
-                  lastMoveAt = System.currentTimeMillis()))
+              meta.copy(id = newId, lastBytes = 0L, lastMoveAt = System.currentTimeMillis()))
       promise.resolve(newId.toDouble())
     } catch (e: Exception) {
       promise.reject("RESUME", e.message ?: "无法继续该下载", e)
@@ -287,7 +263,7 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
         val id = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID))
         liveIds.add(id)
         val titleIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
-        val cursorTitle = if (titleIdx >= 0) cursor.getString(titleIdx) else "下载"
+        val cursorTitle = (if (titleIdx >= 0) cursor.getString(titleIdx) else null) ?: "下载"
         var meta = byId[id]
         if (meta == null) {
           // First time we see a uid download we didn't enqueue ourselves
@@ -317,7 +293,9 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
           } else if (meta.lastMoveAt in 1 until now - STALL_MS) {
             // No progress for a long time: cancel and surface it as failed
             // with a retry hint instead of leaving a zombie entry.
-            stalled.add(meta.copy(deadReason = "长时间无响应，已自动取消"))
+            stalled.add(meta.copy(deadReason = if (meta.url.isEmpty())
+              "长时间无响应，已自动取消，请回到控制台重新下载"
+            else "长时间无响应，已自动取消"))
             stalledNames.add(meta.fileName.ifEmpty { cursorTitle })
             continue
           }
@@ -387,7 +365,7 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
         val text = stalledNames.joinToString("、")
         try {
           reactContext.getNativeModule(NotificationsModule::class.java)
-              ?.notify(6.0, "下载已自动取消", "「$text」长时间无响应，可重试或删除")
+              ?.notify(6.0, "下载已自动取消", "「$text」长时间无响应，请在下载管理查看")
         } catch (e: Exception) {
           // notification is best-effort
         }
@@ -417,8 +395,8 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
     val lid = id.toLong()
     val meta = loadMeta().firstOrNull { it.id == lid }
     try {
-      if (meta != null) {
-        val file = File(downloadDir(), meta.fileName)
+      if (meta != null && meta.url.isNotEmpty()) {
+        val file = File(downloadDir() ?: error("外部存储不可用"), meta.fileName)
         if (!file.exists()) {
           promise.reject("OPEN", "文件不存在（可能已被清理）")
           return
@@ -428,7 +406,11 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
                 reactContext, "${reactContext.packageName}.fileprovider", file)
         viewFile(uri, mimeFor(meta.fileName), promise)
       } else {
-        val uri = Uri.parse("content://downloads/my_downloads/$lid")
+        val uri = dm.getUriForDownloadedFile(lid)
+        if (uri == null) {
+          promise.reject("OPEN", "下载未完成或文件已被移除")
+          return
+        }
         viewFile(uri, downloadMime(lid), promise)
       }
     } catch (e: Exception) {
@@ -585,12 +567,12 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
-    if (reactContext.packageManager.resolveActivity(view, 0) == null) {
-      promise.reject("OPEN", "本机没有能打开该文件的应用")
-      return
+    try {
+      reactContext.startActivity(view)
+      promise.resolve(null)
+    } catch (e: ActivityNotFoundException) {
+      promise.reject("OPEN", "本机没有能打开该文件的应用", e)
     }
-    reactContext.startActivity(view)
-    promise.resolve(null)
   }
 
   private fun mimeFor(fileName: String): String {

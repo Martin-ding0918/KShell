@@ -224,3 +224,33 @@ export function deserializeLockConfig(raw: string | null): LockConfig | null {
     return null;
   }
 }
+
+export interface LockAttempts {
+  failures: number;
+  retryAt: number;
+}
+
+export const NO_LOCK_ATTEMPTS: Readonly<LockAttempts> = {failures: 0, retryAt: 0};
+const MAX_LOCK_DELAY_MS = 5 * 60_000;
+
+export function recordLockFailure(previous: LockAttempts, now: number): LockAttempts {
+  const failures = Math.min(previous.failures + 1, 30);
+  const delay = failures < 5 ? 0 : Math.min(5_000 * 2 ** (failures - 5), MAX_LOCK_DELAY_MS);
+  return {failures, retryAt: delay > 0 ? now + delay : 0};
+}
+
+export function parseLockAttempts(raw: string | null, now: number): LockAttempts {
+  if (raw != null) {
+    try {
+      const value = JSON.parse(raw) as Partial<LockAttempts> | null;
+      const {failures, retryAt} = value ?? {};
+      if (typeof failures === 'number' && Number.isInteger(failures) && failures >= 0 && failures <= 30 &&
+          typeof retryAt === 'number' && Number.isSafeInteger(retryAt) && retryAt >= 0) {
+        return {failures, retryAt: Math.min(retryAt, now + MAX_LOCK_DELAY_MS)};
+      }
+    } catch {
+      // Invalid persisted state.
+    }
+  }
+  return NO_LOCK_ATTEMPTS;
+}

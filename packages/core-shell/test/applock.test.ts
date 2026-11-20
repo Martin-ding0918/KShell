@@ -1,3 +1,4 @@
+import {NO_LOCK_ATTEMPTS, parseLockAttempts, recordLockFailure} from '../src/applock';
 import {describe, expect, it} from 'vitest';
 import {
   activeSecrets,
@@ -131,5 +132,27 @@ describe('applock multi-method model', () => {
 
   it('patternToString joins dot order', () => {
     expect(patternToString([0, 1, 5, 8])).toBe('0158');
+  });
+});
+
+
+describe('lock backoff', () => {
+  it('persists failures and doubles delay from the fifth failure up to five minutes', () => {
+    const now = 1700000000000;
+    let attempts = NO_LOCK_ATTEMPTS;
+    for (let i = 1; i <= 4; i++) {
+      attempts = recordLockFailure(attempts, now);
+      expect(attempts).toEqual({failures: i, retryAt: 0});
+    }
+    const fifth = recordLockFailure(attempts, now);
+    expect(fifth.retryAt).toBe(now + 5_000);
+    attempts = parseLockAttempts(JSON.stringify(fifth), now);
+    expect(recordLockFailure(attempts, fifth.retryAt)).toEqual({failures: 6, retryAt: now + 15_000});
+    expect(recordLockFailure({failures: 30, retryAt: 0}, now)).toEqual({failures: 30, retryAt: now + 300_000});
+  });
+
+  it('ignores malformed state and bounds a deadline after wall-clock rollback', () => {
+    expect(parseLockAttempts('{"failures":-1,"retryAt":5}', 0)).toEqual(NO_LOCK_ATTEMPTS);
+    expect(parseLockAttempts('{"failures":5,"retryAt":999999}', 0)).toEqual({failures: 5, retryAt: 300_000});
   });
 });

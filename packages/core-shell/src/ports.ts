@@ -1,7 +1,6 @@
 /**
  * Platform ports. core-shell stays framework-free; the app supplies these
- * adapters (Android/iOS via RN libraries today, HarmonyOS via ArkTS APIs or
- * RNOH adapters later).
+ * adapters for the supported mobile platform.
  */
 
 /** Encrypted key-value strings (MMKV with encryption, Keystore-backed key). */
@@ -21,6 +20,7 @@ export interface BiometricAuth {
 export const STORAGE_KEYS = {
   machines: 'zshell.machines.v1',
   lock: 'zshell.lock.v1',
+  lockAttempts: 'zshell.lockAttempts.v1',
   legal: 'zshell.legal.v1',
   prefs: 'zshell.prefs.v1',
 } as const;

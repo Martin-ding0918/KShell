@@ -1,0 +1,48 @@
+diff --git a/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt b/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
+index f83033b..1909274 100644
+--- a/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
++++ b/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewManagerImpl.kt
+@@ -501,4 +501,29 @@ class RNCWebViewManagerImpl(private val newArch: Boolean = false) {
+     fun setInjectedJavaScriptBeforeContentLoaded(viewWrapper: RNCWebViewWrapper, value: String?) {
+-        val view = viewWrapper.webView
+-        view.injectedJSBeforeContentLoaded = value
++        val view = viewWrapper.webView
++        viewWrapper.kimiThemeScript?.remove()
++        viewWrapper.kimiThemeScript = null
++        view.injectedJSBeforeContentLoaded = value
++        if (value == null) return
++        val header = value.substringBefore('\n')
++        val prefix = "// kshell-kimi-document-theme:"
++        val end = "\n// kshell-kimi-theme-end\n"
++        if (!header.startsWith(prefix) || !value.contains(end)) return
++        val color = header.removePrefix(prefix)
++        if (!Regex("#[0-9a-fA-F]{6}").matches(color)) return
++
++        // The WebView itself must stay TRANSPARENT (upstream RNCWebViewWrapper
++        // behavior). Making it opaque reintroduces the OEM white flash: the
++        // renderer's empty-document frames during slow navigations paint white
++        // regardless of setBackgroundColor. The wrapper carries the theme color
++        // instead, so unpainted frames composite over the dark container.
++        viewWrapper.setBackgroundColor(android.graphics.Color.parseColor(color))
++        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
++            viewWrapper.kimiThemeScript = androidx.webkit.WebViewCompat.addDocumentStartJavaScript(
++                view,
++                value.substringAfter('\n').substringBefore(end),
++                setOf("https://code-rc.kimi.com", "https://code-rc.kimi.ai"),
++            )
++            // Keep the regular bridge and topbar on the existing callback.
++            view.injectedJSBeforeContentLoaded = value.substringAfter(end)
++        }
+     }
+diff --git a/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewWrapper.kt b/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewWrapper.kt
+--- a/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewWrapper.kt
++++ b/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewWrapper.kt
+@@ -21,5 +21,6 @@ class RNCWebViewWrapper(context: Context, webView: RNCWebView) : FrameLayout(context) {
+   }
+-
++
++  var kimiThemeScript: androidx.webkit.ScriptHandler? = null
+   val webView: RNCWebView = getChildAt(0) as RNCWebView
+-
++
+   companion object {

@@ -4,12 +4,12 @@ import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {KIMI_TOPBAR_PATCH} from '../src/kimiTopbar.ts';
+import {buildKimiThemePrelude, KIMI_TOPBAR_PATCH} from '../src/kimiTopbar.ts';
 
 const chrome = process.env.CHROME_PATH;
 assert.ok(chrome, 'Set CHROME_PATH to a Chromium browser executable');
 
-const fixture = function (install) {
+const fixture = function (install, applyTheme) {
   const app = document.querySelector('.app');
   const pill = () => app.querySelector('.zshell-status');
   const box = element => element.getBoundingClientRect();
@@ -30,6 +30,38 @@ const fixture = function (install) {
   };
   const mark = result => { document.querySelector('output').textContent = result; };
   void (async () => {
+    const root = document.documentElement;
+    const getTheme = () => document.getElementById('kshell-kimi-document-theme');
+    const canvas = () => getComputedStyle(root).backgroundColor;
+    const location = {hostname: 'code-rc.kimi.com', protocol: 'https:', pathname: '/devices/test/'};
+    applyTheme('dark', 'dark', {...location, hostname: 'example.com'});
+    applyTheme('dark', 'dark', {...location, pathname: '/login'});
+    check(!getTheme(), 'bootstrap ignores other origins and the login page');
+    const head = document.head;
+    head.remove();
+    applyTheme('dark', null, location);
+    root.prepend(head);
+    await Promise.resolve();
+    check(canvas() === 'rgb(18, 18, 18)' && root.dataset.colorScheme === 'system',
+      'system startup paints dark once the head is parsed');
+    getTheme().remove();
+    applyTheme('light', 'dark', location);
+    check(canvas() === 'rgb(18, 18, 18)' && root.dataset.colorScheme === 'dark',
+      'saved dark theme wins over a light host');
+    applyTheme('light', 'light', location);
+    check(root.dataset.colorScheme === 'dark', 'reinjection does not reset theme');
+    getTheme().remove();
+    root.dataset.colorScheme = 'system';
+    applyTheme('dark', 'light', location);
+    check(canvas() === 'rgb(255, 255, 255)' && root.dataset.colorScheme === 'light',
+      'saved light theme wins over a dark host');
+    const officialStyle = document.createElement('style');
+    officialStyle.textContent = 'html[data-color-scheme="dark"]{--color-bg:#1e1e1e;color-scheme:dark}';
+    head.append(officialStyle);
+    root.dataset.colorScheme = 'dark';
+    check(canvas() === 'rgb(30, 30, 30)' && getComputedStyle(root).colorScheme === 'dark',
+      'official CSS and subsequent theme choices take precedence');
+
     install();
     const old = app.querySelector('.topbar');
     assertLayout(old);
@@ -88,19 +120,23 @@ const tempRoot = resolve(tmpdir());
 const temp = mkdtempSync(join(tempRoot, 'kshell-topbar-'));
 try {
   const html = join(temp, 'fixture.html');
-  writeFileSync(html, `<!doctype html><meta charset="utf-8">
+  const colors = {dark: '#121212', light: '#ffffff'};
+  const preludes = Object.fromEntries(['dark', 'light'].map(scheme =>
+    [scheme, buildKimiThemePrelude(scheme, colors)]));
+  writeFileSync(html, `<!doctype html><html data-color-scheme="system"><meta charset="utf-8">
     <style>
       .app {width: 390px}
       .topbar {display:flex; height:72px; box-sizing:border-box}
       .tb-main {display:flex; flex:1; align-items:center}
     </style>
-    <div class="app mobile"><header class="topbar"><button class="tb-main">
+    <div id="app"><div class="app mobile"><header class="topbar"><button class="tb-main">
       <span class="tb-line"><span class="tt">Previous session</span></span></button>
-      <button class="ui-icon-button">≡</button></header></div>
+      <button class="ui-icon-button">≡</button></header></div></div>
     <output>TEST DID NOT FINISH</output><script>
       (${fixture.toString()})(() => new Function('location', ${JSON.stringify(KIMI_TOPBAR_PATCH)})({
         hostname: 'code-rc.kimi.com', pathname: '/devices/test/'
-      }));
+      }), (scheme, stored, url) => new Function('location', 'localStorage',
+        ${JSON.stringify(preludes)}[scheme])(url, {getItem: () => stored}));
     </script>`);
   const result = execFileSync(chrome, [
     '--headless', '--disable-gpu', '--disable-software-rasterizer', '--disable-background-networking',

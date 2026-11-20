@@ -3,8 +3,6 @@ import {
   compareVersions,
   isNewer,
   parseLatestRelease,
-  pickLatestRelease,
-  preferredAbiTags,
 } from '../src/update';
 
 describe('compareVersions', () => {
@@ -97,7 +95,7 @@ describe('parseLatestRelease', () => {
       {name: 'KShell-0.0.1.12-public-universal.apk', browser_download_url: 'universal'},
     ]};
     expect(parseLatestRelease(other, ['arm64-v8a'], true)).toBeNull();
-    expect(pickLatestRelease([other, arm], ['arm64-v8a'], true)?.apkUrl).toBe('arm');
+    expect(parseLatestRelease(arm, ['arm64-v8a'], true)?.apkUrl).toBe('arm');
   });
 
   it('honors a device-derived asset preference (translation env -> universal)', () => {
@@ -112,19 +110,5 @@ describe('parseLatestRelease', () => {
     expect(parseLatestRelease(release, ['universal'])!.apkUrl).toBe('u');
     expect(parseLatestRelease(release, ['x86_64', 'universal'])!.apkUrl).toBe('x');
     expect(parseLatestRelease(release, ['armeabi-v7a', 'universal'])!.apkUrl).toBe('u');
-    expect(pickLatestRelease([release], ['universal'])!.apkUrl).toBe('u');
-  });
-});
-
-describe('preferredAbiTags', () => {
-  it.each([
-    [['x86_64', 'arm64-v8a', 'x86'], ['universal']],
-    [['arm64-v8a', 'x86'], ['universal']],
-    [['arm64-v8a', 'armeabi-v7a'], ['arm64-v8a', 'universal']],
-    [['x86_64', 'x86'], ['x86_64', 'universal']],
-    [['armeabi-v7a'], ['armeabi-v7a', 'universal']],
-    [[], ['universal']],
-  ])('abis %j -> %j', (abis, expected) => {
-    expect(preferredAbiTags(abis)).toEqual(expected);
   });
 });

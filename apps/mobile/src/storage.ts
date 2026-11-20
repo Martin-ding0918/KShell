@@ -6,6 +6,8 @@ import {
   KNOWN_ORIGINS,
   LegalConsent,
   LockConfig,
+  LockAttempts,
+  parseLockAttempts,
   MachineRegistry,
   PairingCredentials,
   SecureKvStore,
@@ -51,10 +53,10 @@ export const secureStore: SecureKvStore = {
   getString: (key: string): string | null =>
     (mmkv.getString(key) as string | null) ?? null,
   set: (key: string, value: string): void => {
-    mmkv.setString(key, value);
+    if (!mmkv.setString(key, value)) throw new Error('无法写入加密存储');
   },
   remove: (key: string): void => {
-    mmkv.remove(key);
+    mmkv.removeItem(key);
   },
 };
 
@@ -78,6 +80,19 @@ export function loadLockConfig(): LockConfig {
 
 export function saveLockConfig(config: LockConfig): void {
   secureStore.set(STORAGE_KEYS.lock, serializeLockConfig(config));
+  clearLockAttempts();
+}
+
+export function loadLockAttempts(): LockAttempts {
+  return parseLockAttempts(secureStore.getString(STORAGE_KEYS.lockAttempts), Date.now());
+}
+
+export function saveLockAttempts(attempts: LockAttempts): void {
+  secureStore.set(STORAGE_KEYS.lockAttempts, JSON.stringify(attempts));
+}
+
+export function clearLockAttempts(): void {
+  secureStore.remove(STORAGE_KEYS.lockAttempts);
 }
 
 export function loadLegalConsent(): LegalConsent | null {

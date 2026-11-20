@@ -95,15 +95,19 @@ export const WS_OBSERVER_PATCH_SOURCE = String.raw`(function () {
     }
     function signalFromMessage(data) {
       try {
-        if (!isJsonObject(data)) { return; }
-        if (data.indexOf('"KICKED"') !== -1) {
+        if (typeof data !== 'string') { return; }
+        var kicked = data.indexOf('"KICKED"') !== -1;
+        var pair = data.indexOf('"pair_status"') !== -1;
+        var approval = data.indexOf('"permission_request"') !== -1 ||
+            data.indexOf('"elicitation_request"') !== -1;
+        if ((!kicked && !pair && !approval) || !isJsonObject(data)) { return; }
+        if (kicked) {
           post('kicked', {});
           return;
         }
-        var m = /"pair_status"\s*:\s*"([^"]+)"/.exec(data);
+        var m = pair && /"pair_status"\s*:\s*"([^"]+)"/.exec(data);
         if (m) { post('pair-status', { status: m[1] }); }
-        if (data.indexOf('"permission_request"') !== -1 ||
-            data.indexOf('"elicitation_request"') !== -1) {
+        if (approval) {
           post('approval-waiting', {});
         }
       } catch (e) { /* ignore malformed frames */ }
@@ -190,13 +194,7 @@ export const ABORT_SIGNAL_PATCH_SOURCE = String.raw`(function () {
 /**
  * Patch P-4: polyfill Promise.withResolvers for older WebView runtimes.
  *
- * Observed: the DSH web console's session controller ("control stream") and
- * several dependent modules (model settings, onboarding slots) build their
- * first promise with Promise.withResolvers(), which shipped in Chrome 119.
- * Emulators, containers and unupdated OEM system WebViews often carry an
- * older frozen engine (observed: Chrome 110 on MuMu/Android 15), where the
- * call throws synchronously — the workspace picker stays empty and
- * conversations never open even though every RPC on the wire succeeds.
+ * Shipped in Chrome 119; older WebView engines may not provide it.
  *
  * Patch: standard-semantics polyfill (per the TC39 proposal). Probes
  * (self-retiring):

@@ -1,4 +1,5 @@
-import {hostLabel, PairingCredentials, parsePairingUrl, ParseFailureReason} from './pairing-url';
+import {PairingCredentials} from './types';
+import {hostLabel, parsePairingUrl, ParseFailureReason} from './pairing-url';
 
 /**
  * A saved remote machine (paired desktop endpoint). The whole registry is
@@ -23,17 +24,6 @@ export interface MachineRecord {
   lastUsedAt: number | null;
   /** Per-machine notification mute (older backups may lack this field). */
   muted?: boolean;
-  /**
-   * DSH only: user accepted this machine's untrusted certificate (self-
-   * signed / private CA). Cleared by re-pairing or via the management panel.
-   */
-  trustSelfSigned?: boolean;
-  /**
-   * DSH only: HTTP Basic credential when the self-hosted origin sits behind
-   * a reverse proxy's auth. Secret — lives in the encrypted registry blob,
-   * must never reach logs or diagnostics.
-   */
-  basicAuth?: {username: string; password: string} | null;
   /** Last observed console login state (see MachineLoginState). */
   loginState?: MachineLoginState;
   /** When loginState was last observed (ms). */
@@ -56,19 +46,8 @@ export interface MachineRegistryOptions {
   acceptsCredentials?: (credentials: PairingCredentials) => boolean;
 }
 
-/** Sanitized HTTP Basic credential from an imported record, or null. */
-function basicAuthOf(rec: Partial<MachineRecord>): {username: string; password: string} | null {
-  const b = rec.basicAuth;
-  if (
-    b == null ||
-    typeof b !== 'object' ||
-    typeof b.username !== 'string' ||
-    typeof b.password !== 'string' ||
-    b.username.length === 0
-  ) {
-    return null;
-  }
-  return {username: b.username, password: b.password};
+function isSupportedKind(creds: PairingCredentials): boolean {
+  return creds.kind === undefined || creds.kind === 'zcode' || creds.kind === 'kimi';
 }
 
 function defaultName(creds: PairingCredentials): string {  if (creds.kind === 'kimi') {
@@ -95,7 +74,10 @@ export class MachineRegistry {
     this.acceptsCredentials = opts.acceptsCredentials ?? (() => true);
     this.data = data == null
       ? {version: 1, machines: [], nextSortOrder: 1, nextId: 1}
-      : {...data, machines: data.machines.filter(m => this.acceptsCredentials(m.credentials))};
+      : {...data, machines: data.machines
+          .filter(m => m?.credentials && isSupportedKind(m.credentials) && this.acceptsCredentials(m.credentials))
+          .map(({id, name, credentials, favorite, sortOrder, createdAt, lastUsedAt, muted, loginState, loginAt}) =>
+            ({id, name, credentials, favorite, sortOrder, createdAt, lastUsedAt, muted, loginState, loginAt}))};
     this.now = opts.now ?? Date.now;
   }
 
@@ -195,37 +177,6 @@ export class MachineRegistry {
     return true;
   }
 
-  /** DSH: accept / revoke the machine's untrusted TLS certificate. */
-  setTrustSelfSigned(id: string, trust: boolean): boolean {
-    const m = this.data.machines.find(x => x.id === id);
-    if (m == null) {
-      return false;
-    }
-    if (trust) {
-      m.trustSelfSigned = true;
-    } else {
-      delete m.trustSelfSigned;
-    }
-    return true;
-  }
-
-  /**
-   * DSH: set or clear the HTTP Basic credential for this origin.
-   * Empty username clears the credential.
-   */
-  setBasicAuth(id: string, username: string, password: string): boolean {
-    const m = this.data.machines.find(x => x.id === id);
-    if (m == null) {
-      return false;
-    }
-    if (username.length === 0) {
-      m.basicAuth = null;
-    } else {
-      m.basicAuth = {username, password};
-    }
-    return true;
-  }
-
   /** Record the last observed web-login state (Kimi Code machines). */
   setLoginState(id: string, state: MachineLoginState): boolean {
     const m = this.data.machines.find(x => x.id === id);
@@ -292,10 +243,7 @@ export class MachineRegistry {
         typeof creds.sid !== 'string' ||
         typeof creds.hash !== 'string' ||
         typeof creds.origin !== 'string' ||
-        (creds.kind !== undefined &&
-          creds.kind !== 'zcode' &&
-          creds.kind !== 'kimi' &&
-          creds.kind !== 'dsh') ||
+        !isSupportedKind(creds) ||
         !this.acceptsCredentials(creds)
       ) {
         continue;
@@ -326,8 +274,6 @@ export class MachineRegistry {
         createdAt: typeof rec.createdAt === 'number' ? rec.createdAt : this.now(),
         lastUsedAt: null,
         muted: rec.muted === true,
-        ...(rec.trustSelfSigned === true ? {trustSelfSigned: true} : {}),
-        ...(basicAuthOf(rec) != null ? {basicAuth: basicAuthOf(rec)} : {}),
         ...(loginState != null
           ? {loginState, loginAt: typeof rec.loginAt === 'number' ? rec.loginAt : null}
           : {}),

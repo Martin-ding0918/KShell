@@ -73,35 +73,6 @@ export function isNewer(current: string, release: ReleaseInfo): boolean {
   return compareVersions(release.version, current) > 0;
 }
 
-/** True when the version carries an alpha/beta/rc pre-release suffix. */
-export function isPrerelease(version: string): boolean {
-  return /-(alpha|beta|rc)\./i.test(version.trim().replace(/^v/i, ''));
-}
-
-/**
- * Ordered asset-name tags to prefer, derived from the device ABI list.
- * Translation environments (emulators / containers) list arm64 together with
- * x86 — there a split-ABI APK can mismatch the installed primary ABI and
- * crash at startup, so the universal APK is the only safe pick.
- */
-export function preferredAbiTags(abis: readonly string[]): string[] {
-  const hasArm64 = abis.includes('arm64-v8a');
-  const hasX86 = abis.some(a => a === 'x86_64' || a === 'x86');
-  if (hasArm64 && hasX86) {
-    return ['universal'];
-  }
-  if (hasArm64) {
-    return ['arm64-v8a', 'universal'];
-  }
-  if (abis.includes('x86_64')) {
-    return ['x86_64', 'universal'];
-  }
-  if (abis.includes('armeabi-v7a')) {
-    return ['armeabi-v7a', 'universal'];
-  }
-  return ['universal'];
-}
-
 /**
  * Pick the best APK asset: first match by the ordered preference tags
  * (default arm64-v8a then universal), else any APK (ABI split releases
@@ -145,7 +116,7 @@ export function parseLatestRelease(
   }
   const assets = Array.isArray(rel.assets) ? (rel.assets as AssetLike[]) : [];
   const apk = pickApkAsset(assets, prefer, requirePreferred);
-  if (apk == null) {
+  if (typeof apk?.browser_download_url !== 'string') {
     return null;
   }
   return {
@@ -156,30 +127,4 @@ export function parseLatestRelease(
     apkSize: typeof apk.size === 'number' ? apk.size : null,
     publishedAt: typeof rel.published_at === 'string' ? rel.published_at : null,
   };
-}
-
-/**
- * Pick the newest usable release from a GitHub `GET /releases` list.
- * Needed because pre-release-marked versions are excluded from
- * `releases/latest` — the list endpoint includes them.
- */
-export function pickLatestRelease(
-  json: unknown,
-  prefer?: readonly string[],
-  requirePreferred = false,
-): ReleaseInfo | null {
-  if (!Array.isArray(json)) {
-    return null;
-  }
-  let best: ReleaseInfo | null = null;
-  for (const item of json) {
-    const info = parseLatestRelease(item, prefer, requirePreferred);
-    if (info == null) {
-      continue;
-    }
-    if (best == null || compareVersions(info.version, best.version) > 0) {
-      best = info;
-    }
-  }
-  return best;
 }

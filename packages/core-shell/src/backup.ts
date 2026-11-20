@@ -10,7 +10,7 @@ import {
  * Encrypted backup of the machine registry (and other plain settings).
  *
  * Construction from primitives we already ship (no new cipher code):
- *   master   = PBKDF2-HMAC-SHA256(passphrase, salt, 20000, 64)
+ *   master   = PBKDF2-HMAC-SHA256(passphrase, salt, iterations, 64)
  *   encKey   = HMAC(master, "zshell-backup/enc")
  *   macKey   = HMAC(master, "zshell-backup/mac")
  *   keystream = HMAC(encKey, "zshell-backup/stream" || counter)  (CTR mode)
@@ -18,15 +18,14 @@ import {
  *   tag      = HMAC(macKey, header || ciphertext)  (encrypt-then-MAC)
  *
  * A wrong passphrase or a tampered blob fails the tag check and returns null.
- * Wire format (single line, easy to copy): ZSBK1.<salt>.<ciphertext>.<tag>
+ * Wire format: ZSBK2.<iterations>.<salt>.<ciphertext>.<tag>
+ * Legacy ZSBK1 omits the iteration field and uses 20000 iterations.
  */
 
-const ITERATIONS = 20000;
-const PREFIX = 'ZSBK1';
+export const LEGACY_BACKUP_ITERATIONS = 20_000;
+export const BACKUP_ITERATIONS = 600_000;
+const MAX_ITERATIONS = 1_000_000;
 const SALT_LEN = 16;
-
-/** Exposed for the app-side async path (native PBKDF2 bridge). */
-export const BACKUP_ITERATIONS = ITERATIONS;
 
 /** Symmetric keys for one backup blob, derived from the PBKDF2 master. */
 export interface BackupKeys {
@@ -52,39 +51,45 @@ export function backupKeysFromMaster(master: Uint8Array): BackupKeys {
 /**
  * Derive backup keys from the passphrase. This is the expensive PBKDF2 step
  * that blocks the JS thread for seconds — the app layer runs the same KDF
- * natively (securekdf.ts) and only uses this sync path as a fallback.
+ * natively (securekdf.ts) and does not use this sync path.
  */
 export function deriveBackupKeys(
   passphrase: string,
   salt: Uint8Array,
+  iterations: number = BACKUP_ITERATIONS,
 ): BackupKeys {
-  const master = pbkdf2Sha256(utf8Encode(passphrase), salt, ITERATIONS, 64);
+  const master = pbkdf2Sha256(utf8Encode(passphrase), salt, iterations, 64);
   return backupKeysFromMaster(master);
 }
 
-/** Parsed blob fields; exposes the salt so keys can be derived separately. */
 export interface ParsedBackupBlob {
   saltB64: string;
   salt: Uint8Array;
+  iterations: number;
 }
 
-/** Shape-check a ZSBK1 blob and pull out its salt; null when malformed. */
-export function parseBackupBlob(raw: string): ParsedBackupBlob | null {
-  const parts = raw.trim().split('.');
-  if (parts.length !== 4 || parts[0] !== PREFIX) {
-    return null;
-  }
+function readBackup(blob: string) {
+  const parts = blob.trim().split('.');
+  const v1 = parts.length === 4 && parts[0] === 'ZSBK1';
+  const v2 = parts.length === 5 && parts[0] === 'ZSBK2' && /^[1-9][0-9]{0,6}$/.test(parts[1]);
+  if (!v1 && !v2) return null;
+  const iterations = v1 ? LEGACY_BACKUP_ITERATIONS : Number(parts[1]);
+  if (v2 && (iterations < BACKUP_ITERATIONS || iterations > MAX_ITERATIONS)) return null;
+  const [saltB64, ctB64, tagB64] = parts.slice(-3);
   try {
-    const salt = base64ToBytes(parts[1]);
-    const ct = base64ToBytes(parts[2]);
-    const tag = base64ToBytes(parts[3]);
-    if (salt.length !== SALT_LEN || tag.length !== 32 || ct.length === 0) {
-      return null;
-    }
-    return {saltB64: parts[1], salt};
+    const salt = base64ToBytes(saltB64);
+    const ct = base64ToBytes(ctB64);
+    const tag = base64ToBytes(tagB64);
+    if (salt.length !== SALT_LEN || tag.length !== 32 || ct.length === 0) return null;
+    return {saltB64, salt, iterations, ct, tag, header: parts.slice(0, -2).join('.')};
   } catch {
     return null;
   }
+}
+
+export function parseBackupBlob(raw: string): ParsedBackupBlob | null {
+  const parsed = readBackup(raw);
+  return parsed && {saltB64: parsed.saltB64, salt: parsed.salt, iterations: parsed.iterations};
 }
 
 function keystream(key: Uint8Array, length: number): Uint8Array {
@@ -144,7 +149,7 @@ export function encryptBackupWithKeys(
   for (let i = 0; i < plain.length; i++) {
     ct[i] = plain[i] ^ ks[i];
   }
-  const header = `${PREFIX}.${bytesToBase64(salt)}`;
+  const header = `ZSBK2.${BACKUP_ITERATIONS}.${bytesToBase64(salt)}`;
   const tag = hmacSha256(macKey, concat(utf8Encode(header), ct));
   return `${header}.${bytesToBase64(ct)}.${bytesToBase64(tag)}`;
 }
@@ -158,7 +163,7 @@ export function decryptBackup(blob: string, passphrase: string): string | null {
   if (parsed == null) {
     return null;
   }
-  return decryptBackupWithKeys(blob, deriveBackupKeys(passphrase, parsed.salt));
+  return decryptBackupWithKeys(blob, deriveBackupKeys(passphrase, parsed.salt, parsed.iterations));
 }
 
 /** KDF-free decrypt stage: caller supplies keys (derived wherever it likes). */
@@ -166,18 +171,12 @@ export function decryptBackupWithKeys(
   blob: string,
   keys: BackupKeys,
 ): string | null {
-  const parts = blob.trim().split('.');
-  if (parts.length !== 4 || parts[0] !== PREFIX) {
-    return null;
-  }
+  const parsed = readBackup(blob);
+  if (parsed == null) return null;
   try {
-    const ct = base64ToBytes(parts[2]);
-    const tag = base64ToBytes(parts[3]);
-    if (tag.length !== 32 || ct.length === 0) {
-      return null;
-    }
+    const {ct, tag, header} = parsed;
     const {encKey, macKey} = keys;
-    const expect = hmacSha256(macKey, concat(utf8Encode(`${PREFIX}.${parts[1]}`), ct));
+    const expect = hmacSha256(macKey, concat(utf8Encode(header), ct));
     if (!timingSafeEqual(expect, tag)) {
       return null;
     }

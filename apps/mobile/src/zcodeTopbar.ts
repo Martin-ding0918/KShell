@@ -1,3 +1,12 @@
+import type {ConsoleStatus} from '@zshell/core-shell';
+
+export type ZcodePage = 'other' | 'home' | 'chat';
+
+export function shouldShowZcodeFooter(page: ZcodePage, status: ConsoleStatus, loadFailed: boolean): boolean {
+  // A relay socket can open before the page finishes device authentication.
+  return loadFailed || (page === 'other' && (status === 'disconnected' || status === 'kicked'));
+}
+
 // Compact ZCode console topbar: merges the four stacked toolbars (the shell's
 // native bars plus the page's own mobile header and workspace header) into one
 // row under the system status bar.
@@ -19,7 +28,8 @@
 // dropdowns forwarded from the ⋯ menu still anchor next to the row; the theme
 // menu trigger collapses the same way inside the row.
 // Any missed anchor restores the original layout (forget()) and announces
-// header-off so the native footer pill comes back.
+// header-off. The task home reports 'zshell:zcode-home'. Outside both views,
+// the native footer is reserved for connection failures, not startup.
 //
 // The same script is injected twice (`beforeContentLoaded` and after load);
 // the second run reuses the first observer through `__zshellRefreshZcodeTopbar`.
@@ -78,7 +88,7 @@ export const ZCODE_TOPBAR_PATCH = String.raw`(function () {
     ].join('\n');
     var active = null, row = null, back = null, title = null, dot = null, label = null,
         sidebar = null, staticTitle = null, themeBtn = null, homeBtn = null,
-        menu = null, current = null, navDead = false;
+        menu = null, current = null, navDead = false, pageState = null;
     var ICON_BACK = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10.5 3 5.5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     var ICON_SIDEBAR = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="10" y1="2.5" x2="10" y2="13.5" stroke="currentColor" stroke-width="1.4"/></svg>';
     var render = function () {
@@ -100,8 +110,9 @@ export const ZCODE_TOPBAR_PATCH = String.raw`(function () {
       try {
         var cs = getComputedStyle(row);
         var root = document.documentElement.style;
-        root.setProperty('--zshell-zc-bg', cs.backgroundColor || '#fff');
-        root.setProperty('--zshell-zc-fg', cs.color || '#111');
+        var bg = cs.backgroundColor || '#fff', fg = cs.color || '#111';
+        if (root.getPropertyValue('--zshell-zc-bg') !== bg) root.setProperty('--zshell-zc-bg', bg);
+        if (root.getPropertyValue('--zshell-zc-fg') !== fg) root.setProperty('--zshell-zc-fg', fg);
       } catch (_) { /* cosmetic only */ }
     };
     var dismissMenu = function (e) {
@@ -246,10 +257,19 @@ export const ZCODE_TOPBAR_PATCH = String.raw`(function () {
           (document.head || document.documentElement).appendChild(style);
         }
         if (!section || !parts) {
-          if (active) { forget(); post('zshell:zcode-header-off'); }
-          else if (announce) post('zshell:zcode-header-off');
+          // Off the chat page: the task home paints its own chrome, so the
+          // shell hides the native footer there too ('zshell:zcode-home').
+          // Other views let the shell decide whether a failure needs controls.
+          var state = document.querySelector('section[data-mobile-page="home"]')
+            ? 'home' : 'other';
+          if (active) forget();
+          if (pageState !== state) {
+            pageState = state;
+            post(state === 'home' ? 'zshell:zcode-home' : 'zshell:zcode-header-off');
+          }
           return;
         }
+        pageState = 'chat';
         if (active === parts.row && back && back.parentNode === parts.row &&
             homeBtn === parts.home && staticTitle === parts.staticTitle &&
             (themeBtn || null) === (parts.theme || null)) {
@@ -283,7 +303,7 @@ export const ZCODE_TOPBAR_PATCH = String.raw`(function () {
         dot.appendChild(document.createElement('i'));
         label = dot.appendChild(document.createElement('span'));
         dot.addEventListener('click', function () {
-          if (current && current.reconnect) post('zshell:zcode-reload');
+          if (current && current.reconnect) post('zshell:zcode-reconnect');
           else if (menu) closeMenu();
           else openMenu();
         });

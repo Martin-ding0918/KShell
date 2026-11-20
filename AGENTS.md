@@ -6,7 +6,7 @@
 
 - `packages/core-shell` — **零框架依赖**的纯 TS 核心逻辑（配对解析 / endpoint 选择 / 状态机 / 机器注册表 / 应用锁 / 加密原语）。配 vitest 测试。
 - `packages/patch-bundle` — 注入官方页面的行为补丁 JS（导出为字符串）。
-- `apps/mobile` — React Native 0.82 应用（Android 先行）。
+- `apps/mobile` — React Native 0.82 应用（仅 Android）。
 - `patches/` — npm `patchedDependencies` 补丁（勿删）。
 - `docs/` — 项目文档（架构 / 构建 / 发版 / 合规 + 法律文本）。
 - `CHANGELOG.md` — 更新日志，Release 说明的数据源。
@@ -16,7 +16,7 @@
 
 ```bash
 npm install                                  # 根目录安装（workspaces + npm patch 生效）
-npx vitest run                               # core-shell 单元测试（当前 57 用例）
+npx vitest run                               # 共享核心与纯逻辑单元测试（用例数以运行结果为准）
 cd apps/mobile/android && ./gradlew assembleDebug   # Android 调试包
 cd apps/mobile && npm start                  # Metro（开发时 JS 热载）
 ```
@@ -72,3 +72,4 @@ adb -s 127.0.0.1:16512 shell am start -n io.github.martinding0918.kshell.debug/c
       `LEGAL_DOC_VERSION` 触发重新征求同意
 - [ ] CHANGELOG.md 已添加对应版本段落（CI 发版说明自动取自该段落）
 - [ ] MuMu 或真机冒烟：配对 → 控制台 → 收藏 → 锁屏
+- [ ] 用待发布 APK 完成 Kimi Code 和 ZCode 的[控制台实机冒烟](./docs/release.md#控制台实机冒烟)。

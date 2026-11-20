@@ -1,19 +1,19 @@
 {
   "name": "zcode-shell",
-  "version": "0.0.1-fork.15",
+  "version": "0.0.1-fork.24",
   "private": true,
   "engines": {
     "node": ">=22",
     "npm": ">=12"
   },
-  "description": "ZCode remote-control mobile shell (Android / iOS / HarmonyOS from one codebase)",
+  "description": "Kimi Code and ZCode remote-control shell for Android",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "patchedDependencies": {
     "@react-native/gradle-plugin@0.82.1": "patches/rn-gradle-plugin-drop-foojay.patch",
-    "react-native-webview@13.17.0": "patches/rn-webview-proceed-on-ssl-error.patch"
+    "react-native-webview@13.17.0": "patches/rn-webview-kshell.patch"
   },
   "scripts": {
     "test": "vitest run",

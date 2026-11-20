@@ -4,7 +4,17 @@ import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {ZCODE_TOPBAR_PATCH} from '../src/zcodeTopbar.ts';
+import {shouldShowZcodeFooter, ZCODE_TOPBAR_PATCH} from '../src/zcodeTopbar.ts';
+
+for (const status of ['connecting', 'connected', 'waiting']) {
+  assert.equal(shouldShowZcodeFooter('other', status, false), false,
+    `startup has no footer when the bridge reports ${status}`);
+}
+assert.equal(shouldShowZcodeFooter('other', 'disconnected', false), true);
+assert.equal(shouldShowZcodeFooter('other', 'kicked', false), true);
+assert.equal(shouldShowZcodeFooter('other', 'connecting', true), true);
+assert.equal(shouldShowZcodeFooter('home', 'connected', false), false);
+assert.equal(shouldShowZcodeFooter('chat', 'disconnected', false), false);
 
 const chrome = process.env.CHROME_PATH;
 assert.ok(chrome, 'Set CHROME_PATH to a Chromium browser executable');
@@ -70,6 +80,9 @@ const fixture = function (install) {
     check(posted('zshell:zcode-downloads'), 'downloads item posts');
     check(!menu(), 'menu closes after item');
     pill().click();
+    itemByText('重新加载').click();
+    check(posted('zshell:zcode-reload'), 'reload item refreshes the current page');
+    pill().click();
     itemByText('所有会话').click();
     check(clicks.home === 2, 'all-sessions forwards to hidden back-home');
     pill().click();
@@ -95,7 +108,7 @@ const fixture = function (install) {
     window.__zshellUpdateZcodeStatus({short: '重连', label: '连接已断开，点按重连', color: '#ef4444', reconnect: true});
     pill().click();
     check(!menu(), 'no menu while reconnect pending');
-    check(posted('zshell:zcode-reload'), 'dead pill triggers reload');
+    check(posted('zshell:zcode-reconnect'), 'dead pill reconnects separately from menu reload');
 
     // ‹ dims without web history.
     window.__zshellUpdateZcodeNav({canGoBack: false});
@@ -146,6 +159,20 @@ const fixture = function (install) {
     await frame();
     check(!!pill() && posted('zshell:zcode-header-on'), 're-attaches after recovery');
     check(row().querySelectorAll('.zshell-status').length === 1, 'recovery keeps one pill');
+
+    // Task home page: announce home so the native footer hides there.
+    original.remove();
+    window.__posts.length = 0;
+    const home = document.createElement('section');
+    home.setAttribute('data-mobile-page', 'home');
+    document.body.appendChild(home);
+    await frame();
+    check(posted('zshell:zcode-home'), 'home page announces home');
+    check(!document.querySelector('.zshell-status'), 'shell controls removed on home');
+    home.remove();
+    document.body.appendChild(original);
+    await frame();
+    check(!!pill() && posted('zshell:zcode-header-on'), 'chat re-attaches after home');
     mark('PASS');
   })().catch(error => mark(error.message));
 };

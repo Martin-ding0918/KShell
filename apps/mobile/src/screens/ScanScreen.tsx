@@ -25,10 +25,10 @@ interface ScanScreenProps {
 const REASON_TEXT: Record<string, string> = {
   empty: '内容为空',
   'invalid-url': '不是有效的 URL',
-  'not-https': 'Kimi Code 仅支持 HTTPS',
-  'missing-sid': '不是配对二维码（Kimi Code 需 /devices/…）',
-  'unsupported-host': '此版本仅支持 Kimi Code',
-  'invalid-device-path': '不是有效的 Kimi Code 设备链接',
+  'not-https': '配对链接仅支持 HTTPS',
+  'missing-sid': '不是配对二维码（Kimi Code 需 /devices/…，ZCode 需 sid 参数）',
+  'unsupported-host': '仅接受官方 Kimi Code / ZCode 配对链接',
+  'invalid-device-path': '不是有效的 Kimi Code 设备链接（/devices/…）',
 };
 
 export function ScanScreen({onResult, onDone}: ScanScreenProps) {
@@ -37,7 +37,7 @@ export function ScanScreen({onResult, onDone}: ScanScreenProps) {
   );
   const {font} = useTheme();
   const styles = useStyles();
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<{text: string; error: boolean} | null>(null);
   const handling = useRef(false);
 
   useEffect(() => {
@@ -57,7 +57,7 @@ export function ScanScreen({onResult, onDone}: ScanScreenProps) {
     if (outcome.ok) {
       onDone(outcome);
     } else {
-      setStatus(REASON_TEXT[outcome.reason ?? ''] ?? '无法识别的二维码');
+      setStatus({text: REASON_TEXT[outcome.reason ?? ''] ?? '无法识别的二维码', error: true});
       setTimeout(() => {
         handling.current = false;
       }, 1500);
@@ -65,18 +65,20 @@ export function ScanScreen({onResult, onDone}: ScanScreenProps) {
   };
 
   const pickFile = async () => {
-    setStatus('正在识别图片…');
+    if (handling.current) return;
+    handling.current = true;
+    setStatus({text: '正在识别图片…', error: false});
     try {
       const url = await pickAndDecodeQr();
       if (url == null) {
-        setStatus('未在图片中找到二维码');
+        setStatus({text: '未在图片中找到二维码', error: true});
         handling.current = false;
         return;
       }
       handling.current = false;
       handleUrl(url);
     } catch {
-      setStatus('读取图片失败');
+      setStatus({text: '读取图片失败', error: true});
       handling.current = false;
     }
   };
@@ -107,11 +109,11 @@ export function ScanScreen({onResult, onDone}: ScanScreenProps) {
       <View style={styles.bottom}>
         {status != null ? (
           <View style={styles.statusBox}>
-            <Text style={styles.statusText}>{status}</Text>
+            <Text style={[styles.statusText, status.error && styles.errorText]}>{status.text}</Text>
           </View>
         ) : (
           <Text style={styles.tip}>
-            对准桌面端「远程控制」二维码（Kimi Code），{'\n'}
+            对准桌面端「远程控制」二维码（Kimi Code / ZCode），{'\n'}
             或从相册选择二维码图片
           </Text>
         )}
@@ -124,7 +126,7 @@ export function ScanScreen({onResult, onDone}: ScanScreenProps) {
 }
 
 const useStyles = makeStyles(colors => ({
-  root: {flex: 1, backgroundColor: '#000'},
+  root: {flex: 1, backgroundColor: colors.consoleBg},
   noCamera: {
     flex: 1,
     alignItems: 'center',
@@ -142,14 +144,15 @@ const useStyles = makeStyles(colors => ({
     alignItems: 'center',
     gap: 12,
   },
-  tip: {color: 'rgba(255,255,255,0.85)', fontSize: 13, textAlign: 'center'},
+  tip: {color: colors.text, backgroundColor: colors.bgElevatedOverlay, fontSize: 13, textAlign: 'center'},
   statusBox: {
-    backgroundColor: 'rgba(229,83,75,0.9)',
+    backgroundColor: colors.bgElevated,
     borderRadius: radius.m,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  statusText: {color: '#fff', fontSize: 13},
+  statusText: {color: colors.text, fontSize: 13},
+  errorText: {color: colors.danger},
   albumButton: {
     backgroundColor: colors.accent,
     borderRadius: radius.m,

@@ -70,7 +70,7 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
   }, []);
 
   const requestPermission = async (
-    permission: string,
+    permission: Parameters<typeof PermissionsAndroid.request>[0],
     setGranted: (v: boolean) => void,
     setBlocked: (v: boolean) => void,
   ) => {

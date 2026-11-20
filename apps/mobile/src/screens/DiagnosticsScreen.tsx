@@ -28,6 +28,8 @@ const LABELS: Record<string, string> = {
   'network-online': '网络恢复',
   'network-offline': '网络断开',
   'load-error': '页面加载失败',
+  'load-timeout': '页面加载超时',
+  'reload-timeout': '页面重新加载超时',
   'ssl-trust-reload': '信任证书后重连',
   'http-401': '需要访问口令（401）',
   'basic-auth-reload': '保存口令后重连',

@@ -1,18 +1,21 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   AppState,
+  Clipboard,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from 'react-native';
 import {
   WebView,
-  WebViewErrorEvent,
   WebViewNavigation,
   WebViewMessageEvent,
-  WebViewOpenWindowEvent,
 } from 'react-native-webview';
+import type {WebViewErrorEvent, WebViewOpenWindowEvent} from 'react-native-webview/lib/WebViewTypes';
 import {
   buildConsoleUrl,
   ConsoleEvent,
@@ -27,11 +30,55 @@ import {
   withinQuietHours,
 } from '@zshell/core-shell';
 import {buildPatchSource} from '@zshell/patch-bundle';
-import {KIMI_TOPBAR_PATCH} from '../kimiTopbar';
-import {ZCODE_TOPBAR_PATCH} from '../zcodeTopbar';
+import {buildKimiThemePrelude, KIMI_TOPBAR_PATCH} from '../kimiTopbar';
+import {shouldShowZcodeFooter, ZCODE_TOPBAR_PATCH, type ZcodePage} from '../zcodeTopbar';
+import {observeKimiLogin} from '../consoleLogin';
+import {formatConsoleAttempt, type ConsoleAttempt, type ConsoleFailure} from '../consoleAttempt';
 import {logDiag} from '../diagnostics';
+import {openInBrowser} from '../downloads';
 import {loadPrefs, notifications} from '../notifications';
-import {makeStyles, Palette, radius, useTheme} from '../theme';
+import {makeStyles, Palette, palettes, radius, useTheme} from '../theme';
+
+const kimiConsoleColors = {dark: palettes.dark.consoleBg, light: palettes.light.consoleBg};
+
+// 优先等待 first-contentful-paint；不支持或未上报时用双 rAF 兜底。
+const FIRST_PAINT_PROBE = String.raw`(function () {
+  try {
+    if (window.__zshellPaintProbeApplied) return;
+    var bridge = window.ReactNativeWebView;
+    if (!bridge) return;
+    window.__zshellPaintProbeApplied = true;
+    var observer, timer, sent = false;
+    var post = function () {
+      if (sent) return;
+      sent = true;
+      clearTimeout(timer);
+      if (observer) observer.disconnect();
+      bridge.postMessage('zshell:first-paint');
+    };
+    var fallback = function () {
+      requestAnimationFrame(function () { requestAnimationFrame(post); });
+    };
+    if (window.performance && performance.getEntriesByName &&
+        performance.getEntriesByName('first-contentful-paint', 'paint').length) {
+      post();
+      return;
+    }
+    try {
+      if (window.PerformanceObserver && PerformanceObserver.supportedEntryTypes &&
+          PerformanceObserver.supportedEntryTypes.indexOf('paint') !== -1) {
+        observer = new PerformanceObserver(function (list) {
+          if (list.getEntriesByName('first-contentful-paint').length) post();
+        });
+        observer.observe({type: 'paint', buffered: true});
+        timer = setTimeout(fallback, 1000);
+        return;
+      }
+    } catch (_) {}
+    fallback();
+  } catch (_) {}
+})();
+`;
 
 function statusMeta(
   status: ConsoleStatus,
@@ -86,10 +133,19 @@ interface ConsoleScreenProps {
 export function ConsoleScreen({machine, foreground, onBack, registerBackHandler, onOpenDownloads, onLoginState}: ConsoleScreenProps) {
   const {colors, font} = useTheme();
   const styles = useStyles();
-  const webviewRef = useRef<WebView>(null);
+  const webviewRef = useRef<WebView<object>>(null);
   const canGoBackRef = useRef(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [status, setStatus] = useState<ConsoleStatus>('connecting');
+  const statusRef = useRef<ConsoleStatus>('connecting');
+  statusRef.current = status;
+  const isKimi = machine.credentials.kind === 'kimi';
+  const attempt = useRef<ConsoleAttempt>({startedAt: performance.now()});
+  const [failureReport, setFailureReport] = useState('');
+  const recordFailure = useCallback((failure: ConsoleFailure) => {
+    setFailureReport(formatConsoleAttempt(isKimi ? 'Kimi Code' : 'ZCode',
+      attempt.current, statusRef.current, failure, performance.now()));
+  }, [isKimi]);
   // True while the WebView's own load has failed (error page visible).
   const [loadFailed, setLoadFailed] = useState(false);
   const prefsRef = useRef(loadPrefs());
@@ -97,19 +153,40 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   // The WebView source must stay referentially stable: with keep-alive the
   // console stays mounted while App re-renders (registry copies make the
   // machine prop a fresh object each time), and a new source object would
-  // reload the page. Intentional reloads go through key={reloadKey}.
+  // reload the page. The key is used to rebuild a failed renderer.
   const webSource = useMemo(() => ({uri: url}), [url]);
-  const isKimi = machine.credentials.kind === 'kimi';
+  // 原生遮罩：盖住 WebView 表面，直到真实页面提交首帧。实测（小米 17，
+  // 录屏逐帧 + logcat）从 WebView 创建到首帧绘制之间（慢隧道下 6~10s），
+  // 表面一直显示初始白色缓冲；0.0.1.23 的 warm-up 页方案依赖"已绘制帧
+  // 跨导航保留"，在默认渲染后端下不成立（验收通过时设备残留强制 GL 实验
+  // 旗标），还会把 data: 页留在 WebView 历史里（侧滑返回多出白色中间页）。
+  // 原生遮罩由 App 进程合成，与 WebView 后端无关；首帧信号或 15s 兜底后撤除。
+  const [cover, setCover] = useState<
+    'opening' | 'reloading' | 'load-timeout' | 'reload-timeout' | 'hidden'
+  >('opening');
+  useEffect(() => {
+    if (cover === 'reloading') webviewRef.current?.reload();
+    if (cover !== 'opening' && cover !== 'reloading') return;
+    const timeout = cover === 'reloading' ? 'reload-timeout' : 'load-timeout';
+    const timer = setTimeout(() => {
+      logDiag(timeout);
+      recordFailure({kind: timeout});
+      setCover(current => current === cover ? timeout : current);
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [cover, reloadKey, recordFailure]);
   const isZcode = hostKindOf(machine.credentials) === 'zcode';
+  const [needsLogin, setNeedsLogin] = useState(false);
   const [kimiHeaderReady, setKimiHeaderReady] = useState(false);
-  const [zcodeHeaderReady, setZcodeHeaderReady] = useState(false);
+  const [zcodePage, setZcodePage] = useState<ZcodePage>('other');
   const [controlsVisible, setControlsVisible] = useState(false);
   const patchSource = useMemo(
     () =>
+      (isKimi ? buildKimiThemePrelude(colors.scheme, kimiConsoleColors) : '') +
       buildPatchSource() +
       (isKimi ? '\n' + KIMI_TOPBAR_PATCH : '') +
       (isZcode ? '\n' + ZCODE_TOPBAR_PATCH : ''),
-    [isKimi, isZcode],
+    [isKimi, isZcode, colors.scheme],
   );
   const statusDetails = useMemo(() => statusMeta(status, colors), [status, colors]);
   const pushKimiStatus = useCallback(() => {
@@ -144,8 +221,8 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     webviewRef.current?.injectJavaScript(`window.__zshellUpdateZcodeStatus?.(${value}); true;`);
   }, [status, statusDetails]);
   useEffect(() => {
-    if (zcodeHeaderReady) pushZcodeStatus();
-  }, [zcodeHeaderReady, pushZcodeStatus]);
+    if (zcodePage === 'chat') pushZcodeStatus();
+  }, [zcodePage, pushZcodeStatus]);
   // Notification ids must not collide across simultaneously-alive console
   // sessions: offset by a stable hash of the machine id.
   const notifyIdBase = useMemo(
@@ -203,7 +280,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   const [authWindowUrl, setAuthWindowUrl] = useState<string | null>(null);
   // The bridge handler is created once per machine; menu items reach the
   // latest reload through a ref so the callback identity stays stable.
-  const reloadRef = useRef<() => void>(() => {});
+  const reloadRef = useRef<(mode?: 'current-page') => void>(() => {});
   // Web-history back, shared by the system back handler and the merged ZCode
   // topbar's ‹ button (web back is distinct from back-to-list).
   const handleWebBack = useCallback(() => {
@@ -216,12 +293,27 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   const handleBridgeMessage = useCallback(
     (event: WebViewMessageEvent) => {
       const data = event.nativeEvent.data;
-      if (isKimi && /^code-rc\.kimi\.(com|ai)$/.test(authHostOf(event.nativeEvent.url))) {
+      const host = authHostOf(event.nativeEvent.url);
+      const kimiPage = isKimi && /^code-rc\.kimi\.(com|ai)$/.test(host);
+      const zcodeConsole = isZcode && /^(zcode\.z\.ai|zcode\.chatglm\.site)$/.test(host);
+      if ((kimiPage || zcodeConsole) && data === 'zshell:first-paint') {
+        attempt.current.firstPaintAt ??= performance.now();
+        logDiag('first-paint');
+        setLoadFailed(false);
+        setCover('hidden');
+        return;
+      }
+      if (kimiPage) {
         if (data === 'zshell:kimi-header-on' || data === 'zshell:kimi-header-off') {
           const ready = data === 'zshell:kimi-header-on';
           setKimiHeaderReady(ready);
           if (ready) pushKimiStatus();
           else setControlsVisible(false);
+          return;
+        }
+        if (data.startsWith('zshell:kimi-theme:')) {
+          // Document-start theme pin from buildKimiThemePrelude.
+          logDiag('kimi-theme-pin', data.slice('zshell:kimi-theme:'.length));
           return;
         }
         if (data === 'zshell:kimi-menu') {
@@ -239,16 +331,21 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           return;
         }
         if (data === 'zshell:kimi-reload') {
-          setControlsVisible(false);
-          reloadRef.current();
+          reloadRef.current('current-page');
           return;
         }
       }
-      if (isZcode && /^(zcode\.z\.ai|zcode\.chatglm\.site)$/.test(authHostOf(event.nativeEvent.url))) {
+      if (zcodeConsole) {
         if (data === 'zshell:zcode-header-on' || data === 'zshell:zcode-header-off') {
           const ready = data === 'zshell:zcode-header-on';
-          setZcodeHeaderReady(ready);
-          if (ready) pushZcodeStatus();
+          setZcodePage(ready ? 'chat' : 'other');
+          if (ready) {
+            pushZcodeStatus();
+          }
+          return;
+        }
+        if (data === 'zshell:zcode-home') {
+          setZcodePage('home');
           return;
         }
         if (data === 'zshell:zcode-webback') {
@@ -264,6 +361,10 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           return;
         }
         if (data === 'zshell:zcode-reload') {
+          reloadRef.current('current-page');
+          return;
+        }
+        if (data === 'zshell:zcode-reconnect') {
           reloadRef.current();
           return;
         }
@@ -274,6 +375,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       }
       logDiag(bridgeEvent.type, diagDetail(bridgeEvent));
       if (bridgeEvent.type === 'approval-waiting') {
+        if (foreground && AppState.currentState === 'active') return;
         notify(notifyIdBase + 2, 'approval', `${brand} · 等待你的批准`, 'Agent 请求执行操作，点开应用处理');
         return;
       }
@@ -292,23 +394,30 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     [notify, brand, isKimi, isZcode, foreground, pushKimiStatus, pushZcodeStatus, handleWebBack, onBack, onOpenDownloads],
   );
 
-  const reload = useCallback(() => {
+  const reload = useCallback((mode?: 'current-page') => {
     logDiag('page-reload');
+    attempt.current = {startedAt: performance.now()};
+    setFailureReport('');
     setKimiHeaderReady(false);
-    setZcodeHeaderReady(false);
+    setZcodePage('other');
     setStatus('connecting');
     setLoadFailed(false);
+    setNeedsLogin(false);
     setControlsVisible(false);
     // A full page load cannot complete an OAuth popup started earlier; leaving
     // the overlay up would cover the reloaded console forever.
     setAuthWindowUrl(null);
+    if (mode === 'current-page' && webviewRef.current) {
+      // Keep the live renderer and refresh the current console document.
+      setCover('reloading');
+      return;
+    }
+    setCover('opening');
     canGoBackRef.current = false;
     setReloadKey(k => k + 1);
   }, []);
   reloadRef.current = reload;
 
-  const statusRef = useRef<ConsoleStatus>('connecting');
-  statusRef.current = status;
   const loadFailedRef = useRef(false);
   loadFailedRef.current = loadFailed;
 
@@ -338,37 +447,29 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   // Kimi Code 登录态观测：页面最终落在 /login = 未登录，留在 /devices/ = 已登录。
   // 注：必须用 onNavigationStateChange——本版本 onLoadEnd 事件在 Android
   // 上不带 url（undefined）。诊断只记布尔，不记 URL 内容（路径含设备标识）。
-  const observeLoginState = useCallback(
-    (url: string) => {
-      if (machine.credentials.kind !== 'kimi' || url.length === 0) {
-        return;
-      }
-      logDiag(
-        'login-observed',
-        `l:${url.includes('/login')} d:${url.includes('/devices/')}`,
-      );
-      if (url.includes('/login')) {
-        onLoginState?.('logged-out');
-      } else if (url.includes('/devices/')) {
-        onLoginState?.('logged-in');
-      }
-    },
-    [machine.credentials.kind, onLoginState],
-  );
+  const observeLoginState = useCallback((url: string) => {
+    if (!isKimi) return;
+    const login = observeKimiLogin(url);
+    setNeedsLogin(login === 'logged-out');
+    if (login === undefined) return;
+    logDiag('login-observed', login);
+    onLoginState?.(login);
+    if (login === 'logged-in') setAuthWindowUrl(null);
+  }, [isKimi, onLoginState]);
 
   const handleOpenWindow = useCallback((event: WebViewOpenWindowEvent) => {
+    if (!foreground || AppState.currentState !== 'active') return;
     const target = event.nativeEvent.targetUrl;
-    if (typeof target !== 'string' || !target.startsWith('https://')) {
-      return;
+    if (typeof target !== 'string' || !/^https?:\/\//i.test(target)) return;
+    const host = authHostOf(target);
+    if (!host) return;
+    logDiag('window-open', host);
+    if (isKimi && /^https:\/\/auth\.kimi\.com(?::443)?(?:[/?#]|$)/i.test(target)) {
+      setAuthWindowUrl(target);
+    } else {
+      openInBrowser(target).catch(() => Alert.alert('无法打开浏览器'));
     }
-    // 诊断只记主机名——事件不得携带 URL / 凭据
-    try {
-      logDiag('window-open', new URL(target).host);
-    } catch {
-      logDiag('window-open');
-    }
-    setAuthWindowUrl(target);
-  }, []);
+  }, [foreground, isKimi]);
 
   useEffect(() => {
     registerBackHandler(handleWebBack);
@@ -384,6 +485,30 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     }
     hideTimerRef.current = setTimeout(() => setControlsVisible(false), 5000);
   }, []);
+
+  const renderFailure = (message: string, retry: () => void) => (
+    <View style={styles.errorBox} accessibilityLiveRegion="polite">
+      <Text style={styles.noticeTitle}>{message}</Text>
+      <View style={styles.noticeActions}>
+        <TouchableOpacity style={styles.backButton} onPress={onBack} accessibilityRole="button">
+          <Text style={styles.backText}>返回列表</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.retryButton} onPress={retry} accessibilityRole="button">
+          <Text style={styles.retryText}>重试</Text>
+        </TouchableOpacity>
+      </View>
+      {failureReport !== '' && (
+        <TouchableOpacity style={styles.backButton} accessibilityRole="button" onPress={() => {
+          Clipboard.setString(failureReport);
+          ToastAndroid.show('已复制本次诊断', ToastAndroid.SHORT);
+        }}>
+          <Text style={styles.backText}>复制本次诊断</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+  const connectionHint = needsLogin ? '请在上方登录 Kimi 账号' :
+    status === 'waiting' ? statusDetails.label : undefined;
   useEffect(() => {
     return () => {
       if (hideTimerRef.current != null) {
@@ -394,17 +519,15 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
 
   return (
     <View style={styles.root}>
-      <WebView
+      <WebView<object>
         key={reloadKey}
         ref={webviewRef}
         source={webSource}
         injectedJavaScriptBeforeContentLoaded={patchSource}
         injectedJavaScript={
-          isKimi
-            ? KIMI_TOPBAR_PATCH + '\ntrue;'
-            : isZcode
-              ? ZCODE_TOPBAR_PATCH + '\ntrue;'
-              : undefined
+          FIRST_PAINT_PROBE +
+          (isKimi ? KIMI_TOPBAR_PATCH : isZcode ? ZCODE_TOPBAR_PATCH : '') +
+          '\ntrue;'
         }
         javaScriptEnabled
         domStorageEnabled
@@ -413,7 +536,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         style={styles.webview}
         containerStyle={styles.webview}
         // Kimi Code 登录（auth.kimi.com）经 window.open 发起，必须放行
-        // 多窗口事件；onOpenWindow 把目标页导航回同一个 WebView。
+        // 多窗口事件；官方授权页留在应用内，其余 HTTP(S) 链接外开。
         setSupportMultipleWindows
         javaScriptCanOpenWindowsAutomatically
         onOpenWindow={handleOpenWindow}
@@ -423,10 +546,6 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         onNavigationStateChange={(nav: WebViewNavigation) => {
           canGoBackRef.current = nav.canGoBack;
           const url = typeof nav.url === 'string' ? nav.url : '';
-          // 登录完成后原页面跳回设备页——授权覆盖层随之收起
-          if (url.includes('/devices/')) {
-            setAuthWindowUrl(null);
-          }
           observeLoginState(url);
           // ZCode 合并顶栏的 ‹ 需要 canGoBack 决定置灰
           if (isZcode) {
@@ -436,33 +555,36 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           }
         }}
         onLoadStart={() => {
-          setLoadFailed(false);
+          attempt.current.loadStartedAt ??= performance.now();
           logDiag('page-load-start');
         }}
         onError={(e: WebViewErrorEvent) => {
+          const {code} = e.nativeEvent;
+          recordFailure({kind: 'load-error', code});
           setLoadFailed(true);
-          const desc = e.nativeEvent.description ?? '';
-          logDiag('load-error', desc.slice(0, 60));
+          setCover('hidden');
+          logDiag('load-error', Number.isSafeInteger(code) ? String(code) : undefined);
         }}
         // The OS may kill the WebView renderer while backgrounded; rebuild
         // the page instead of leaving a dead surface.
         onRenderProcessGone={() => reload()}
         onMessage={handleBridgeMessage}
-        renderError={() => (
-          <View style={styles.errorBox}>
-            <Text style={font.dim}>控制台加载失败，多半是网络未就绪或连接中断</Text>
-            <Text style={font.faint}>回到前台会自动重试，也可以现在手动重试</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={reload}>
-              <Text style={styles.retryText}>重试</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        renderError={() => <View />}
       />
+
+      {cover === 'hidden' && !loadFailed && connectionHint && (
+        <View style={styles.connectionHint} accessibilityLiveRegion="polite">
+          <Text style={[font.dim, styles.hintText]}>{connectionHint}</Text>
+          <TouchableOpacity style={styles.backButton} onPress={onBack} accessibilityRole="button">
+            <Text style={styles.backText}>返回列表</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {(isKimi
         ? kimiHeaderReady && controlsVisible
         : isZcode
-          ? !zcodeHeaderReady
+          ? shouldShowZcodeFooter(zcodePage, status, loadFailed)
           : true) ? (
       <View style={[styles.consoleFooter, kimiHeaderReady && styles.kimiMenu]}>
         {controlsVisible ? (
@@ -505,6 +627,26 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       </View>
       ) : null}
 
+      {(cover === 'opening' || cover === 'reloading') && !loadFailed && (
+        <View style={styles.paintCover} accessibilityLiveRegion="polite">
+          <ActivityIndicator color={colors.textDim} />
+          <Text style={styles.noticeTitle}>
+            {cover === 'reloading' ? '正在重新加载控制台' : '正在加载控制台'}
+          </Text>
+          <TouchableOpacity style={styles.backButton} onPress={onBack} accessibilityRole="button">
+            <Text style={styles.backText}>返回列表</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {(loadFailed || cover === 'load-timeout' || cover === 'reload-timeout') && (
+        <View style={StyleSheet.absoluteFill}>
+          {renderFailure(
+            loadFailed ? '控制台加载失败' : cover === 'reload-timeout' ? '控制台重新加载超时' : '控制台加载超时',
+            () => reload(!loadFailed && cover === 'reload-timeout' ? 'current-page' : undefined),
+          )}
+        </View>
+      )}
+
       {authWindowUrl != null && (
         <View style={styles.authOverlay}>
           <View style={styles.authBar}>
@@ -520,7 +662,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
               <Text style={styles.authCloseText}>✕</Text>
             </TouchableOpacity>
           </View>
-          <WebView
+          <WebView<object>
             source={{uri: authWindowUrl}}
             injectedJavaScriptBeforeContentLoaded={buildPatchSource()}
             javaScriptEnabled
@@ -554,7 +696,7 @@ const useStyles = makeStyles((colors, font) => ({
     borderRadius: radius.m,
     backgroundColor: colors.bgElevated,
     elevation: 4,
-    shadowColor: '#000',
+    shadowColor: colors.text,
     shadowOpacity: 0.18,
     shadowRadius: 12,
     shadowOffset: {width: 0, height: 4},
@@ -586,6 +728,32 @@ const useStyles = makeStyles((colors, font) => ({
   reloadText: {color: colors.accent, fontSize: 14},
   statusDot: {width: 8, height: 8, borderRadius: 4},
   webview: {flex: 1, backgroundColor: colors.consoleBg},
+  paintCover: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    padding: 24,
+    backgroundColor: colors.consoleBg,
+  },
+  noticeTitle: {...font.body, textAlign: 'center'},
+  noticeActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  connectionHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    backgroundColor: colors.bgElevated,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  hintText: {flex: 1},
   errorBox: {
     flex: 1,
     alignItems: 'center',
@@ -599,7 +767,6 @@ const useStyles = makeStyles((colors, font) => ({
     paddingHorizontal: 28,
     paddingVertical: 11,
     borderRadius: radius.m,
-    marginTop: 4,
   },
   retryText: {color: colors.onAccent, fontSize: 15, fontWeight: '600'},
   authOverlay: {

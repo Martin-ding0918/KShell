@@ -16,6 +16,7 @@ interface SecretInputProps {
   placeholder: string;
   onSubmitEditing?: () => void;
   autoFocus?: boolean;
+  editable?: boolean;
 }
 
 /**
@@ -28,6 +29,7 @@ export function SecretInput({
   placeholder,
   onSubmitEditing,
   autoFocus,
+  editable,
 }: SecretInputProps) {
   const {colors} = useTheme();
   const styles = useStyles();
@@ -42,6 +44,7 @@ export function SecretInput({
         autoCapitalize="none"
         autoCorrect={false}
         autoFocus={autoFocus}
+        editable={editable}
         value={value}
         onChangeText={onChangeText}
         onSubmitEditing={

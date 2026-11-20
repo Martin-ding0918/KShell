@@ -73,8 +73,7 @@ export function removeDownload(id: number): Promise<void> {
 }
 
 /**
- * Continue a paused download. Resolves the (possibly new) download id —
- * the native side restarts in place when it can, re-enqueues otherwise.
+ * Restart an app-enqueued paused download. Resolves the new download id.
  */
 export function resumeDownload(id: number): Promise<number> {
   return module().resumeDownload(id);

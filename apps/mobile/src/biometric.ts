@@ -1,7 +1,7 @@
 import ReactNativeBiometrics from 'react-native-biometrics';
 import {BiometricAuth} from '@zshell/core-shell';
 
-const biometrics = new ReactNativeBiometrics({allowDeviceCredential: false});
+const biometrics = new ReactNativeBiometrics({allowDeviceCredentials: false});
 
 export const biometricAuth: BiometricAuth = {
   async isAvailable() {

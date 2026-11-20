@@ -13,7 +13,6 @@ import {
   LockVerifier,
   LOCK_ITERATIONS,
   parseBackupBlob,
-  pbkdf2Sha256,
   SecretKind,
   utf8Encode,
 } from '@zshell/core-shell';
@@ -23,8 +22,7 @@ import {
  * core-shell is portable but synchronous — at 20k iterations it freezes the
  * JS thread for seconds (enough to trip the Android ANR watchdog), so every
  * expensive derivation (app-lock set/verify, backup export/restore) runs
- * natively when the module is present and only falls back to the pure
- * version in environments without it (tests). Both produce byte-identical
+ * natively. The pure-TS implementation produces byte-identical
  * hashes, so verifiers and blobs are interchangeable across the two paths.
  */
 type ZShellCryptoNative = {
@@ -59,7 +57,7 @@ async function derive(
       ),
     );
   }
-  return pbkdf2Sha256(utf8Encode(secret), salt, iterations, dkLen);
+  throw new Error('原生加密模块不可用');
 }
 
 // ---------- app lock ----------
@@ -120,6 +118,6 @@ export async function decryptBackupAsync(
   if (parsed == null) {
     return null;
   }
-  const master = await derive(passphrase, parsed.salt, BACKUP_ITERATIONS, 64);
+  const master = await derive(passphrase, parsed.salt, parsed.iterations, 64);
   return decryptBackupWithKeys(blob, backupKeysFromMaster(master));
 }

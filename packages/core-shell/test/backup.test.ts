@@ -1,17 +1,15 @@
+import {pbkdf2Sync} from 'node:crypto';
 import {describe, expect, it} from 'vitest';
 import {
+  BACKUP_ITERATIONS,
   backupKeysFromMaster,
   decryptBackup,
   decryptBackupWithKeys,
-  deriveBackupKeys,
-  encryptBackup,
   encryptBackupWithKeys,
   parseBackupBlob,
 } from '../src/backup';
-import {pbkdf2Sha256, utf8Encode} from '../src/crypto';
 import {DiagnosticsLog} from '../src/diagnostics';
 import {MachineRegistry} from '../src/machine';
-import {isPrerelease} from '../src/update';
 
 const SALT = new Uint8Array(16).map((_, i) => i + 1);
 
@@ -26,80 +24,58 @@ function registryJson(): string {
 }
 
 describe('backup encryption', () => {
-  it('round-trips a registry payload', () => {
-    const payload = registryJson();
-    const blob = encryptBackup(payload, 'correct horse battery', SALT);
-    expect(blob.startsWith('ZSBK1.')).toBe(true);
+  const pass = 'correct horse battery';
+  const keysFor = (salt: Uint8Array, iterations = BACKUP_ITERATIONS) =>
+    backupKeysFromMaster(pbkdf2Sync(pass, salt, iterations, 64, 'sha256'));
+  const keys = keysFor(SALT);
+  const payload = registryJson();
+  const blob = encryptBackupWithKeys(payload, keys, SALT);
+
+  it('round-trips ZSBK2 with native-equivalent PBKDF2 and authenticates the header', () => {
+    expect(blob.startsWith('ZSBK2.600000.')).toBe(true);
     expect(blob).not.toContain('deadbeef');
-    expect(blob).not.toContain('My%20Desktop');
-    expect(decryptBackup(blob, 'correct horse battery')).toBe(payload);
+    expect(parseBackupBlob(blob)).toEqual({
+      salt: SALT, saltB64: 'AQIDBAUGBwgJCgsMDQ4PEA==', iterations: BACKUP_ITERATIONS,
+    });
+    expect(decryptBackupWithKeys(blob, keys)).toBe(payload);
+    expect(decryptBackupWithKeys(blob.replace('.600000.', '.600001.'), keys)).toBeNull();
   });
 
-  it('round-trips unicode content', () => {
-    const payload = JSON.stringify({machines: [{name: '华为手机-🧪-Ωμέγα'}]});
-    const blob = encryptBackup(payload, '口令', SALT);
-    expect(decryptBackup(blob, '口令')).toBe(payload);
+  it('restores an independent legacy ZSBK1 fixture using its original KDF', () => {
+    const fixture = 'ZSBK1.AQIDBAUGBwgJCgsMDQ4PEA==.x8Bc7ZEbxLOBVv/TZUSX.bJa8GX5tokyYeBfcFfZITExRjx32wKCBO82OFzhoDgs=';
+    expect(parseBackupBlob(fixture)?.iterations).toBe(20_000);
+    expect(decryptBackup(fixture, 'legacy passphrase')).toBe('{"machines":[]}');
   });
 
-  it('rejects a wrong passphrase', () => {
-    const blob = encryptBackup(registryJson(), 'right', SALT);
-    expect(decryptBackup(blob, 'wrong')).toBeNull();
-  });
-
-  it('rejects tampered ciphertext and tag', () => {
-    const blob = encryptBackup(registryJson(), 'pw', SALT);
+  it('rejects a wrong passphrase and tampered ciphertext or tag', () => {
+    const wrong = backupKeysFromMaster(pbkdf2Sync('wrong', SALT, BACKUP_ITERATIONS, 64, 'sha256'));
+    expect(decryptBackupWithKeys(blob, wrong)).toBeNull();
     const parts = blob.split('.');
-    const tamperedCt = `${parts[0]}.${parts[1]}.${parts[2].slice(0, -2)}AA.${parts[3]}`;
-    expect(decryptBackup(tamperedCt, 'pw')).toBeNull();
-    const tamperedTag = `${parts[0]}.${parts[1]}.${parts[2]}.${parts[3].slice(0, -2)}AA`;
-    expect(decryptBackup(tamperedTag, 'pw')).toBeNull();
+    for (const index of [3, 4]) {
+      const tampered = parts.slice();
+      tampered[index] = (tampered[index][0] === 'A' ? 'B' : 'A') + tampered[index].slice(1);
+      expect(decryptBackupWithKeys(tampered.join('.'), keys)).toBeNull();
+    }
   });
 
-  it('rejects malformed blobs', () => {
-    expect(decryptBackup('', 'pw')).toBeNull();
-    expect(decryptBackup('not-a-backup', 'pw')).toBeNull();
-    expect(decryptBackup('ZSBK1.YQ.YQ.YQ', 'pw')).toBeNull();
+  it.each(['0', '-1', '1e6', '600000.5', '0600000', '599999', '1000001'])('rejects iteration field %s before deriving keys', value => {
+    expect(parseBackupBlob(blob.replace('.600000.', `.${value}.`))).toBeNull();
   });
 
-  it('produces different blobs for different salts', () => {
-    const payload = registryJson();
-    const a = encryptBackup(payload, 'pw', SALT);
-    const b = encryptBackup(payload, 'pw', new Uint8Array(16).fill(9));
-    expect(a).not.toBe(b);
-    expect(decryptBackup(b, 'pw')).toBe(payload);
-  });
-
-  // The app derives the PBKDF2 master natively and reuses the KDF-free
-  // stages; these cross-path cases pin the split API to the legacy one.
-  it('splits cleanly: keys-from-master path decrypts sync-encrypted blobs', () => {
-    const payload = registryJson();
-    const blob = encryptBackup(payload, 'pw', SALT);
-    const parsed = parseBackupBlob(blob);
-    expect(parsed).not.toBeNull();
-    // Native-equivalent: derive master (64 bytes) then the key schedule.
-    const master = pbkdf2Sha256(utf8Encode('pw'), parsed!.salt, 20000, 64);
-    const json = decryptBackupWithKeys(blob, backupKeysFromMaster(master));
-    expect(json).toBe(payload);
-    expect(deriveBackupKeys('pw', parsed!.salt)).toEqual(
-      backupKeysFromMaster(master),
-    );
-  });
-
-  it('encryptBackupWithKeys output decrypts via the sync path', () => {
-    const payload = registryJson();
-    const blob = encryptBackupWithKeys(
-      payload,
-      deriveBackupKeys('pw', SALT),
-      SALT,
-    );
-    expect(decryptBackup(blob, 'pw')).toBe(payload);
-    expect(decryptBackup(blob, 'other')).toBeNull();
-  });
-
-  it('parseBackupBlob rejects malformed shapes', () => {
+  it('rejects malformed shapes', () => {
     expect(parseBackupBlob('')).toBeNull();
     expect(parseBackupBlob('ZSBK1.YQ.YQ.YQ')).toBeNull();
     expect(parseBackupBlob('OTHER.@@@@@@@@@@@@@@@@@@@.YQ.YQ.YQ.YQ')).toBeNull();
+  });
+
+  it('round-trips Unicode and makes distinct ciphertext for distinct salts', () => {
+    const json = JSON.stringify({name: '华为手机-🧪-Ωμέγα'});
+    const salt2 = new Uint8Array(16).fill(9);
+    const keys2 = keysFor(salt2);
+    const a = encryptBackupWithKeys(json, keys, SALT);
+    const b = encryptBackupWithKeys(json, keys2, salt2);
+    expect(a.split('.')[3]).not.toBe(b.split('.')[3]);
+    expect(decryptBackupWithKeys(b, keys2)).toBe(json);
   });
 });
 
@@ -178,15 +154,5 @@ describe('importMachines', () => {
     expect(reg.importMachines('nope')).toEqual({added: 0, updated: 0});
     expect(reg.importMachines([{name: 1}, null, {}])).toEqual({added: 0, updated: 0});
     expect(reg.size).toBe(0);
-  });
-});
-
-describe('isPrerelease', () => {
-  it('classifies version suffixes', () => {
-    expect(isPrerelease('0.0.1-alpha.9')).toBe(true);
-    expect(isPrerelease('0.1.0-beta.1')).toBe(true);
-    expect(isPrerelease('1.0.0-rc.2')).toBe(true);
-    expect(isPrerelease('0.1.0')).toBe(false);
-    expect(isPrerelease('v1.2.3')).toBe(false);
   });
 });

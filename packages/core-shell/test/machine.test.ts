@@ -27,7 +27,7 @@ describe('MachineRegistry', () => {
     expect(filtered.sorted()).toHaveLength(1);
     expect(filtered.get(kimi.record.id)?.loginState).toBe('logged-in');
     expect(filtered.addFromUrl(QR_A)).toEqual({ok: false, reason: 'unsupported-host'});
-    expect(filtered.addFromUrl('http://192.168.1.5:35421/')).toEqual({ok: false, reason: 'unsupported-host'});
+    expect(filtered.addFromUrl('http://192.168.1.5:35421/')).toEqual({ok: false, reason: 'not-https'});
     const restored = new MachineRegistry(null, {acceptsCredentials});
     expect(restored.importMachines(data.machines)).toEqual({added: 1, updated: 0});
     expect(restored.sorted()[0].credentials.kind).toBe('kimi');
@@ -174,94 +174,17 @@ describe('MachineRegistry', () => {
     expect(kimi.name).toBe('Kimi Code CLI abc123');
   });
 
-  it('adds a DSH machine named from its address and dedupes bare-root variants', () => {
-    const {reg} = fakeRegistry();
-    const r = reg.addFromUrl('http://192.168.1.5:3080');
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.record.credentials.kind).toBe('dsh');
-    expect(r.record.name).toBe('192.168.1.5:3080');
-    // Same address with an explicit root slash is the same machine.
-    const again = reg.addFromUrl('http://192.168.1.5:3080/');
-    expect(again.ok && again.updatedExisting).toBe(true);
-    expect(reg.size).toBe(1);
-  });
-
-  it('importMachines accepts dsh records', () => {
+  it('skips retired DSH records when loading or importing a registry', () => {
     const {reg} = fakeRegistry();
     reg.addFromUrl(QR_A);
-    const result = reg.importMachines([
-      {
-        name: '家里的 DSH',
-        credentials: {
-          sid: '10.0.0.4:3080',
-          hash: '',
-          origin: 'http://10.0.0.4:3080',
-          mid: null,
-          deviceName: null,
-          appVersion: null,
-          issuedAt: null,
-          kind: 'dsh',
-        },
-        favorite: false,
-      },
-    ]);
-    expect(result.added).toBe(1);
-    const dsh = reg.sorted().find(m => m.credentials.kind === 'dsh')!;
-    expect(dsh.credentials.origin).toBe('http://10.0.0.4:3080');
-  });
-
-  it('manages DSH certificate trust', () => {
-    const {reg} = fakeRegistry();
-    reg.addFromUrl('https://dsh.example.top');
-    const id = reg.sorted().find(m => m.credentials.kind === 'dsh')!.id;
-    expect(reg.get(id)?.trustSelfSigned).toBeUndefined();
-    expect(reg.setTrustSelfSigned(id, true)).toBe(true);
-    expect(reg.get(id)?.trustSelfSigned).toBe(true);
-    expect(reg.setTrustSelfSigned(id, false)).toBe(true);
-    expect(reg.get(id)?.trustSelfSigned).toBeUndefined();
-    expect(reg.setTrustSelfSigned('m999', true)).toBe(false);
-  });
-
-  it('manages the DSH HTTP Basic credential (empty username clears)', () => {
-    const {reg} = fakeRegistry();
-    reg.addFromUrl('http://192.168.1.5:3080');
-    const id = reg.sorted().find(m => m.credentials.kind === 'dsh')!.id;
-    reg.setBasicAuth(id, 'zshell', 'secret');
-    expect(reg.get(id)?.basicAuth).toEqual({username: 'zshell', password: 'secret'});
-    // 密码留空沿用旧密码的保存语义在应用层，这里验证清除路径
-    reg.setBasicAuth(id, '', '');
-    expect(reg.get(id)?.basicAuth).toBeNull();
-  });
-
-  it('importMachines round-trips DSH trust and basic auth, dropping garbage', () => {
-    const {reg} = fakeRegistry();
-    reg.importMachines([
-      {
-        name: 'A',
-        credentials: {
-          sid: '10.0.0.1:3080', hash: '', origin: 'http://10.0.0.1:3080',
-          mid: null, deviceName: null, appVersion: null, issuedAt: null, kind: 'dsh',
-        },
-        trustSelfSigned: true,
-        basicAuth: {username: 'u', password: 'p'},
-      },
-      {
-        name: 'B',
-        credentials: {
-          sid: '10.0.0.2:3080', hash: '', origin: 'http://10.0.0.2:3080',
-          mid: null, deviceName: null, appVersion: null, issuedAt: null, kind: 'dsh',
-        },
-        trustSelfSigned: 'yes',
-        basicAuth: {username: '', password: 'p'},
-      },
-    ]);
-    const a = reg.sorted().find(m => m.name === 'A')!;
-    expect(a.trustSelfSigned).toBe(true);
-    expect(a.basicAuth).toEqual({username: 'u', password: 'p'});
-    const b = reg.sorted().find(m => m.name === 'B')!;
-    expect(b.trustSelfSigned).toBeUndefined();
-    expect(b.basicAuth).toBeUndefined();
+    const data = reg.toJSON();
+    const legacy = {...data.machines[0], name: 'Legacy', credentials: {
+      ...data.machines[0].credentials, kind: 'dsh',
+    }};
+    expect(reg.importMachines([legacy])).toEqual({added: 0, updated: 0});
+    expect(MachineRegistry.fromJSON(JSON.stringify({
+      ...data, machines: [...data.machines, legacy],
+    }))?.size).toBe(1);
   });
 
   it('importMachines accepts kimi records and sanitizes malformed extras', () => {

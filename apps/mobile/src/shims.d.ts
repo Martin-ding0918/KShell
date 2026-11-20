@@ -1,5 +1,11 @@
 declare module 'pako' {
-  export function inflate(data: Uint8Array): Uint8Array;
+  export class Inflate {
+    constructor(opts?: {windowBits?: number});
+    ended: boolean;
+    err: number;
+    onData: (chunk: Uint8Array) => void;
+    push(data: Uint8Array, flush?: boolean): boolean;
+  }
   export function deflate(data: Uint8Array): Uint8Array;
 }
 
@@ -12,7 +18,7 @@ declare module 'jpeg-js' {
   }
   export function decode(
     buffer: Uint8Array,
-    opts: {useTArray: boolean},
+    opts: {useTArray: boolean; maxResolutionInMP?: number; maxMemoryUsageInMB?: number},
   ): JpegDecodeResult;
   const jpeg: {decode: typeof decode};
   export default jpeg;

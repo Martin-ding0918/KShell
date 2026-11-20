@@ -47,7 +47,6 @@ import {
   clearWebSession,
 } from '../downloads';
 import {fetchLatestRelease, PROJECT_PAGE} from '../updater';
-import type {UpdateChannel} from '../notifications';
 import {biometricLabel} from './LockScreen';
 import {makeStyles, radius, ThemeMode, useTheme} from '../theme';
 import {APP_VERSION} from '../version';
@@ -60,12 +59,7 @@ async function rng(n: number): Promise<Uint8Array> {
   if (native != null) {
     return base64ToBytes(await native.secureRandomBase64(n));
   }
-  // Fallback for environments without the native module (tests/preview).
-  const out = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    out[i] = Math.floor(Math.random() * 256);
-  }
-  return out;
+  throw new Error('安全随机数模块不可用');
 }
 
 interface SettingsScreenProps {
@@ -202,7 +196,7 @@ export function SettingsScreen({
       } else {
         setError('验证失败');
       }
-    });
+    }).catch(() => setError('验证暂不可用，请重试'));
   };
 
   const finishPatternSet = (secret: string) => {
@@ -253,7 +247,7 @@ export function SettingsScreen({
 
   const checkUpdate = async () => {
     setUpdate({kind: 'checking'});
-    const release = await fetchLatestRelease(prefs.updateChannel);
+    const release = await fetchLatestRelease();
     if (release == null) {
       setUpdate({kind: 'failed'});
       return;
@@ -267,8 +261,8 @@ export function SettingsScreen({
 
   const doExportBackup = async () => {
     setError(null);
-    if (backupPass.length < 6) {
-      setError('备份口令至少 6 位');
+    if (backupPass.length < 12) {
+      setError('备份口令至少 12 位');
       return;
     }
     if (backupPass !== backupPass2) {
@@ -731,7 +725,7 @@ export function SettingsScreen({
         {backupMode === 'export' ? (
           <View style={{gap: 10, marginTop: 4}}>
             <Text style={font.dim}>
-              设置备份口令（至少 6 位，只用于加密，应用本身不保存它）
+              设置备份口令（至少 12 位，建议使用长且独特的口令，只用于加密，应用本身不保存它）
             </Text>
             <SecretInput
               placeholder="备份口令"
@@ -760,10 +754,10 @@ export function SettingsScreen({
         ) : null}
         {backupMode === 'restore' ? (
           <View style={{gap: 10, marginTop: 4}}>
-            <Text style={font.dim}>粘贴之前导出的备份文本（ZSBK1. 开头）</Text>
+            <Text style={font.dim}>粘贴之前导出的备份文本（支持 ZSBK1 和 ZSBK2）</Text>
             <TextInput
               style={[styles.input, {height: 88, textAlignVertical: 'top'}]}
-              placeholder="ZSBK1.……"
+              placeholder="ZSBK2.……"
               placeholderTextColor={colors.textFaint}
               multiline
               value={restoreBlob}
@@ -801,7 +795,8 @@ export function SettingsScreen({
       <View style={styles.card}>
         <Text style={styles.cardTitle}>网页登录状态</Text>
         <Text style={font.faint}>
-          控制台网页的登录数据保存在应用内：Kimi 机器共用 Kimi 账号登录
+          控制台网页的登录数据保存在应用内：Kimi 机器共用 Kimi 账号登录（覆盖层授权），
+          ZCode 机器在控制台页内登录与桌面端一致的账号
         </Text>
         <View style={styles.row}>
           <View style={styles.rowMain}>
@@ -886,35 +881,6 @@ export function SettingsScreen({
         </View>
 
         <View style={styles.divider} />
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>更新频道</Text>
-            <Text style={font.faint}>尝鲜版包含 alpha / beta 预发布</Text>
-          </View>
-          <View style={{flexDirection: 'row', gap: 8}}>
-            {(['stable', 'beta'] as UpdateChannel[]).map(ch => {
-              const active = prefs.updateChannel === ch;
-              return (
-                <TouchableOpacity
-                  key={ch}
-                  style={[styles.rowButton, active && styles.rowButtonActive]}
-                  onPress={() => {
-                    const next = {...prefs, updateChannel: ch};
-                    setPrefs(next);
-                    savePrefs(next);
-                  }}>
-                  <Text
-                    style={[
-                      styles.rowButtonText,
-                      active && {color: colors.accent},
-                    ]}>
-                    {ch === 'stable' ? '稳定版' : '尝鲜版'}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
 
         {update.kind === 'failed' ? (
           <Text style={styles.errorText}>
