@@ -46,3 +46,41 @@ diff --git a/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewWr
 -
 +
    companion object {
+diff --git a/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java b/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
+index 80c6803..b41f51d 100644
+--- a/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
++++ b/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
+@@ -327,2 +327,33 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+     public void onMessage(String message, String sourceUrl) {
++        if ("zshell:first-paint".equals(message) && isKShellConsoleOrigin(sourceUrl)
++                && android.os.Build.VERSION.SDK_INT >= 23) {
++            post(() -> {
++                String documentUrl = getUrl();
++                postVisualStateCallback(0, new VisualStateCallback() {
++                    @Override
++                    public void onComplete(long requestId) {
++                        // Let the ready WebView draw underneath the React Native cover.
++                        postOnAnimation(() -> postOnAnimation(() -> {
++                            if (isAttachedToWindow() && TextUtils.equals(documentUrl, getUrl())) {
++                                dispatchIncomingMessage(message, sourceUrl);
++                            }
++                        }));
++                    }
++                });
++            });
++            return;
++        }
++        dispatchIncomingMessage(message, sourceUrl);
++    }
++
++    private static boolean isKShellConsoleOrigin(String sourceUrl) {
++        if (sourceUrl == null) return false;
++        Uri origin = Uri.parse(sourceUrl);
++        if (!"https".equals(origin.getScheme())) return false;
++        String host = origin.getHost();
++        return "code-rc.kimi.com".equals(host) || "code-rc.kimi.ai".equals(host)
++                || "zcode.z.ai".equals(host) || "zcode.chatglm.site".equals(host);
++    }
++
++    private void dispatchIncomingMessage(String message, String sourceUrl) {
+         ThemedReactContext reactContext = getThemedReactContext();
