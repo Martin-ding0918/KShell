@@ -6,7 +6,7 @@
 |---|---|---|
 | Node | ≥ 22（推荐 24） | npm 12 需要 Node ≥ 22（`engines` 已声明） |
 | npm | ≥ 12 | `patchedDependencies` 需要（Node 20 自带的 npm 10 不支持） |
-| JDK | 17–21 | gradle-plugin 子工程 toolchain 17；本机在 `~/.gradle/gradle.properties` 注册 |
+| JDK | 17–21 | gradle-plugin 子工程 toolchain 17；本机由 `D:\android-build\jdk17.0.21_0` 经 `JAVA_HOME` 提供 |
 | Android SDK | API 36 + Build-Tools 36.0.0 | NDK 27.1（缺失时自动下载） |
 
 ## 常用命令
@@ -87,8 +87,9 @@ grep foojay node_modules/@react-native/gradle-plugin/settings.gradle.kts   # 应
 **新增原生依赖前评估其 codegen 产物路径长度**；`core.longpaths=true` 只救 git，救不了 ninja。
 
 ### 国内网络
-- Maven 镜像：`~/.gradle/init.d/zshell-mirrors.gradle`（阿里云优先、官方兜底；
-  机器相关，不进仓库——新机器按 AGENTS.md 重建）
+- 本机工具链与 Gradle 缓存集中在 `D:\android-build\`（`GRADLE_USER_HOME` 固定指向
+  `D:\android-build\gradle`，C 盘 `~/.gradle` 已弃用）；机器相关，不进仓库——
+  新机器按本节与仓库 AGENTS.md 的「构建环境备忘（本机）」重建
 - Gradle 分发：`gradle-wrapper.properties` 已用腾讯镜像
 - npm：仓库 lock 文件统一使用官方注册表地址（CI 与贡献者兼容）；
   本机可用 npmmirror，但**不要**把镜像地址提交进 lock

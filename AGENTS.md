@@ -38,10 +38,13 @@ cd apps/mobile && npm start                  # Metro（开发时 JS 热载）
 
 ## 构建环境备忘（本机）
 
-- 阿里云镜像 init 脚本：`~/.gradle/init.d/zshell-mirrors.gradle`（Maven Central 国内超时的解法）
-- JDK 17/21 注册：`~/.gradle/gradle.properties` 的 `org.gradle.java.installations.paths`
+- 通用 Android 工具链集中在 `D:\android-build\`：JDK（`jdk17.0.21_0`）、SDK（`sdk/`）、
+  Gradle 缓存（`gradle/`，构建经 `GRADLE_USER_HOME` 固定指向，C 盘 `~/.gradle` 已弃用）、
+  adb（`platform-tools/`）、gh.exe（`bin/`）；发版入口脚本 `build-release.ps1`
+  负责设置 `JAVA_HOME`/`GRADLE_USER_HOME` 并装载签名凭据
 - Gradle 分发已用腾讯镜像（`gradle-wrapper.properties`）
-- Android SDK：`D:\DevelopUtils\Android\SDK`（`android/local.properties`，勿提交）
+- Android SDK 路径由构建副本的 `android/local.properties` 指向 `D:/android-build/sdk`（勿提交）
+- 构建与测试一律在本地盘构建副本执行，勿在同步目录内安装依赖或跑测试
 
 ## 代码风格
 
