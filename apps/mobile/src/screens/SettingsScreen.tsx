@@ -63,6 +63,7 @@ async function rng(n: number): Promise<Uint8Array> {
 }
 
 interface SettingsScreenProps {
+  visible: boolean;
   lock: LockConfig;
   onSaveLock: (config: LockConfig) => void;
   machines: MachineRecord[];
@@ -103,6 +104,7 @@ type UpdateState =
 
 /** Settings: multi-method lock management + update check + legal center. */
 export function SettingsScreen({
+  visible,
   lock,
   onSaveLock,
   machines,
@@ -333,11 +335,10 @@ export function SettingsScreen({
     }
   };
 
-  // Poll the system download manager for the running update download; the
-  // installer itself launches natively when the file completes. Also keeps
-  // polling while paused so a silent auto-resume is reflected on the card.
+  // Refresh the card immediately when Settings becomes visible. DownloadManager
+  // continues independently while a sub-screen covers Settings.
   useEffect(() => {
-    if (update.kind !== 'downloading' && update.kind !== 'downloadPaused') {
+    if (!visible || (update.kind !== 'downloading' && update.kind !== 'downloadPaused')) {
       return;
     }
     const {release, id} = update;
@@ -398,13 +399,17 @@ export function SettingsScreen({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [update]);
+  }, [update, visible]);
 
   const sizeText = (bytes: number | null) =>
     bytes == null ? '' : `${Math.round(bytes / 1048576)} MB`;
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={{padding: 16, gap: 14}}>
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={{padding: 16, gap: 14}}
+      importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
+      pointerEvents={visible ? 'auto' : 'none'}>
       <TouchableOpacity onPress={onBack} style={{paddingVertical: 4}}>
         <Text style={{color: colors.accent, fontSize: 16}}>‹ 返回列表</Text>
       </TouchableOpacity>

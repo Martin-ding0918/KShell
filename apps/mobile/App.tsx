@@ -49,6 +49,16 @@ type Screen =
   | {name: 'diagnostics'}
   | {name: 'console'; machineId: string};
 
+// Screens pushed from Settings. While one of them is on top of the stack,
+// Settings stays mounted underneath (overlay rendering) so its scroll
+// position survives the round trip.
+const SETTINGS_SUB_SCREENS: ReadonlySet<Screen['name']> = new Set([
+  'permissions',
+  'downloads',
+  'datamanage',
+  'diagnostics',
+]);
+
 function App(): React.JSX.Element {
   const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode);
   const scheme = useResolvedScheme(themeMode);
@@ -250,13 +260,14 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
   // stays mounted underneath and survives relocking.
 
   const top = stack[stack.length - 1];
-  // Downloads pushed from the console renders as an overlay so the WebView
-  // (and its relay session) stays mounted underneath.
-  const fromConsole =
-    stack.length >= 2 &&
-    top.name === 'downloads' &&
-    stack[stack.length - 2].name === 'console';
-  const base = fromConsole ? stack[stack.length - 2] : top;
+  const below = stack.length >= 2 ? stack[stack.length - 2] : null;
+  // Sub-screens render as overlays so the screen underneath stays mounted:
+  // Downloads pushed from the console keeps the WebView (and its relay
+  // session) alive; a settings sub-screen keeps Settings' scroll position.
+  const fromConsole = below?.name === 'console' && top.name === 'downloads';
+  const fromSettings = below?.name === 'settings' && SETTINGS_SUB_SCREENS.has(top.name);
+  const overlayScreen = fromConsole || fromSettings ? top : null;
+  const base = overlayScreen != null ? below! : top;
   const push = (s: Screen) => setStack(st => [...st, s]);
   const pop = () => setStack(st => (st.length > 1 ? st.slice(0, -1) : st));
   const connectTo = (machineId: string) => {
@@ -307,6 +318,22 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
     />
   );
 
+  // Overlay content for screens that sit on top of a kept-alive base screen.
+  const renderSubScreen = (s: Screen): React.JSX.Element | null => {
+    switch (s.name) {
+      case 'permissions':
+        return <PermissionsScreen onBack={pop} />;
+      case 'downloads':
+        return <DownloadsScreen onBack={pop} visible={!booting && consented && unlocked} />;
+      case 'datamanage':
+        return <DataManageScreen machines={machines} lock={lock} onBack={pop} />;
+      case 'diagnostics':
+        return <DiagnosticsScreen onBack={pop} />;
+      default:
+        return null;
+    }
+  };
+
   let screen: React.JSX.Element | null;
   switch (base.name) {
     case 'scan':
@@ -350,6 +377,7 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
     case 'settings':
       screen = (
         <SettingsScreen
+          visible={!fromSettings && consented && unlocked}
           lock={lock}
           onSaveLock={(cfg: LockConfig) => {
             saveLockConfig(cfg);
@@ -373,16 +401,10 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
       );
       break;
     case 'permissions':
-      screen = <PermissionsScreen onBack={pop} />;
-      break;
     case 'downloads':
-      screen = <DownloadsScreen onBack={pop} visible={!booting && consented && unlocked} />;
-      break;
     case 'datamanage':
-      screen = <DataManageScreen machines={machines} lock={lock} onBack={pop} />;
-      break;
     case 'diagnostics':
-      screen = <DiagnosticsScreen onBack={pop} />;
+      screen = renderSubScreen(base);
       break;
     case 'console': {
       // The console itself renders from the keep-alive session layer below;
@@ -444,9 +466,9 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
           );
         })}
         {screen}
-        {fromConsole ? (
+        {overlayScreen != null ? (
           <View style={styles.overlay}>
-            <DownloadsScreen onBack={pop} visible={!booting && consented && unlocked} />
+            {renderSubScreen(overlayScreen)}
           </View>
         ) : null}
       </View>

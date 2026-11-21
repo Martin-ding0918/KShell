@@ -71,7 +71,7 @@ KShell 的隐私设计只有一条原则：零收集。本应用没有自建服�
    「来自此来源的应用安装」权限，安装与否始终由你确认。
 
 四、第三方组件
-以下开源组件均为本地功能实现，不进行任何数据上报：react-native / react-native-webview（应用框架与控制台容器）、react-native-camera-kit（扫码）、react-native-image-picker（相册选图）、react-native-mmkv-storage（加密存储）、react-native-biometrics（系统生物识别）、jsQR / jpeg-js / pako（本地二维码图片识别）。
+以下开源组件均为本地功能实现，不进行任何数据上报：react-native / react-native-webview（应用框架与控制台容器）、react-native-camera-kit / ZXing（相机取景和本地扫码）、react-native-image-picker（相册选图）、react-native-mmkv-storage（加密存储）、react-native-biometrics（系统生物识别）、jsQR / jpeg-js / pako（本地二维码图片识别）。
 
 五、数据安全
 配对凭据 AES 加密存储、密钥托管于 Android Keystore；应用锁（生物识别/图案/密码）防止他人查看或使用；凭据校验采用 PBKDF2-HMAC-SHA256（随机盐 + 20000 次迭代 + 常数时间比较）。请知悉：远程会话内容经官方中继服务传输，该环节不在本应用控制范围内（见《用户协议与免责声明》第五条）。
@@ -91,6 +91,7 @@ export const OSS_LICENSES: LegalDoc = {
 · react-native / react —— MIT License
 · react-native-webview —— MIT License
 · react-native-camera-kit —— MIT License
+· ZXing —— Apache License 2.0
 · react-native-image-picker —— MIT License
 · react-native-mmkv-storage（内含 Tencent MMKV）—— MIT License
 · react-native-biometrics —— MIT License

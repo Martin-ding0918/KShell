@@ -1,6 +1,6 @@
 {
   "name": "zcode-shell",
-  "version": "0.0.1-fork.25",
+  "version": "0.0.1-fork.26",
   "private": true,
   "engines": {
     "node": ">=22",
@@ -13,7 +13,8 @@
   ],
   "patchedDependencies": {
     "@react-native/gradle-plugin@0.82.1": "patches/rn-gradle-plugin-drop-foojay.patch",
-    "react-native-webview@13.17.0": "patches/rn-webview-kshell.patch"
+    "react-native-webview@13.17.0": "patches/rn-webview-kshell.patch",
+    "react-native-camera-kit@18.0.1": "patches/rn-camera-kit-zxing.patch"
   },
   "scripts": {
     "test": "vitest run",

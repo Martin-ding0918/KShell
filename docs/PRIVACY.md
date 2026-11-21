@@ -37,7 +37,7 @@ KShell 的隐私设计只有一条原则：**零收集**。本软件没有自建
 | 组件 | 用途 |
 |---|---|
 | react-native / react-native-webview | 应用框架与控制台容器 |
-| react-native-camera-kit | 相机扫码 |
+| react-native-camera-kit / ZXing | 相机取景和本地扫码 |
 | react-native-image-picker | 相册选图 |
 | react-native-mmkv-storage | 加密本地存储 |
 | react-native-biometrics | 系统生物识别 |
