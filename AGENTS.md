@@ -17,6 +17,8 @@
 ```bash
 npm install                                  # 根目录安装（workspaces + npm patch 生效）
 npx vitest run                               # 共享核心与纯逻辑单元测试（用例数以运行结果为准）
+(cd apps/mobile && npm run typecheck)        # 移动端 TypeScript 类型检查
+(cd apps/mobile && npm test)                 # 移动端 Jest 组件测试
 cd apps/mobile/android && ./gradlew assembleDebug   # Android 调试包
 cd apps/mobile && npm start                  # Metro（开发时 JS 热载）
 ```
@@ -60,7 +62,7 @@ adb -s 127.0.0.1:16512 shell am start -n io.github.martinding0918.kshell.debug/c
 
 ## 发布检查单（每次发版）
 
-- [ ] `npx vitest run` 全绿
+- [ ] 根目录 `npx vitest run` 和 `apps/mobile` 下的 `npm run typecheck`、`npm test` 均通过
 - [ ] `./gradlew assemblePublicRelease` 成功，唯一的 APK 为 `arm64-v8a`，
       包名为 `io.github.martinding0918.kshell`，使用原有正式签名
 - [ ] 版本号已用脚本同步：`node scripts/bump-version.mjs <版本号>|pre [versionCode]`

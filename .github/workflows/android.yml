@@ -47,6 +47,14 @@ jobs:
       - name: Run core-shell tests
         run: npx vitest run
 
+      - name: Typecheck mobile app
+        working-directory: apps/mobile
+        run: npm run typecheck
+
+      - name: Run mobile Jest tests
+        working-directory: apps/mobile
+        run: npm test
+
       - name: Decode release signing key
         env:
           ZS_KEYSTORE_BASE64: ${{ secrets.ZS_KEYSTORE_BASE64 }}
