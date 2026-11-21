@@ -61,8 +61,8 @@ zcodeTopbar 把 ZCode 会话页原本的四条栏（原生壳条 + 网页 mobile
 菜单入口（断线时直接变「重连」）；锚点只用稳定属性（`data-mobile-page`、
 `data-testid`），原按钮保留原处理器仅改 flex order，工作区头部行收缩为零高隐形盒
 （Radix 弹层仍可从胶囊菜单转发触发）。
-两者任一锚点缺失即整体回退原布局并公告 header-off，原生底部胶囊条随之恢复。
-DOM 观察器监听节点、文字和可见性属性的变化，SPA 路由回调和低频扫描负责补查。
+所需锚点缺失时，补丁恢复网页原布局并上报 `header-off`。ZCode 加载失败时显示原生状态条。在会话页和任务列表之外，断线或会话被顶下线时也会显示原生状态条。
+两个补丁共用 `apps/mobile/src/topbarActivity.ts`。控制台可见时，DOM 观察器、SPA 路由回调和每 1.2 秒的兜底扫描共同维护顶栏。退回列表、打开下载管理、锁定应用或切后台时，壳通知隐藏的页面断开 DOM 观察器并停止定时扫描。再次显示时立即补扫，同时恢复观察和兜底扫描。
 
 ZCode 支持于 0.0.1.8 移除、0.0.1.12 恢复：配对（扫码/手动链接/备份恢复）与控制台
 回到 core-shell 既有逻辑，入口策略闸门在 `apps/mobile/src/storage.ts` 的
@@ -75,6 +75,10 @@ Kimi Code 的账号登录由官方页面在壳内覆盖层完成，登录态（C
 App.tsx 用栈状态自管理导航（未引入 react-navigation，保持依赖精简）。系统返回键
 （BackHandler）的优先级：**控制台页 → 网页自身历史（WebView goBack）→ 应用栈
 逐级返回 → 根页面默认退出**。
+
+`App.tsx` 最多保留三台最近使用的控制台。返回列表时隐藏 WebView，重新打开时可复用仍在运行的会话。只有应用在前台且对应控制台可见时，`ConsoleScreen` 才自动恢复连接已断开、加载失败或渲染进程已退出的会话。隐藏的渲染进程退出后会移除失效的 WebView，等该控制台再次可见再重建。仍在线的隐藏会话继续监听中继事件并按用户设置发送本地通知。
+
+下载列表打开、从后台回来或完成一次管理操作后会立即查询系统下载记录。只有下载列表可见且有未完成任务时，才继续每约 1.5 秒查询一次。实际下载由 Android DownloadManager 执行。
 
 ### 5. 边到边适配策略
 
@@ -92,4 +96,6 @@ App.tsx 用栈状态自管理导航（未引入 react-navigation，保持依赖�
 `MainActivity.onConfigurationChanged` 重新取窗口 / 系统栏颜色与图标明暗。
 JS 侧 `ThemeProvider` 按偏好或 `useColorScheme()` 选调色板，样式用
 `makeStyles` 按方案缓存生成。
+
+控制台直接导航到目标页面，等待时由 React Native 遮罩覆盖 WebView。网页探针优先等到首次内容绘制（FCP），在信号不可用时使用双 `requestAnimationFrame`，然后上报 `zshell:first-paint`。`patches/rn-webview-kshell.patch` 对官方 HTTPS 控制台的这条消息等待 Android WebView 的 `postVisualStateCallback` 及后续绘制帧，再转发给 React Native 撤下遮罩。15 秒内收不到信号时显示超时页，用户可以重试、返回列表或复制本次诊断摘要。
 
