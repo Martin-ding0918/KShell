@@ -72,6 +72,6 @@ adb -s 127.0.0.1:16512 shell am start -n io.github.martinding0918.kshell.debug/c
 - [ ] 免责声明 / 隐私政策内容仍与实际行为一致（docs/PRIVACY.md 中的权限与第三方清单），
       且与 `apps/mobile/src/legal.ts`（应用内展示版）同步；实质性变更时提升
       `LEGAL_DOC_VERSION` 触发重新征求同意
-- [ ] CHANGELOG.md 已添加对应版本段落（CI 发版说明自动取自该段落）
+- [ ] CHANGELOG.md 已添加对应版本段落，GitHub Release 说明使用该段落
 - [ ] MuMu 或真机冒烟：配对 → 控制台 → 收藏 → 锁屏
 - [ ] 用待发布 APK 完成 Kimi Code 和 ZCode 的[控制台实机冒烟](./docs/release.md#控制台实机冒烟)。

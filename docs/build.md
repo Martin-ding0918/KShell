@@ -73,8 +73,8 @@ grep foojay node_modules/@react-native/gradle-plugin/settings.gradle.kts   # 应
 
 ## CI（GitHub Actions）
 
-`.github/workflows/android.yml` 在主分支推送或手动触发时运行测试并构建公开 ARM64 APK。
-工作流校验 native ABI 与签名后上传构建产物。正式发布见 [发版流程](./release.md)。
+`.github/workflows/android.yml` 在主分支推送或手动触发时运行 Vitest、移动端类型检查和 Jest。
+三项通过后，工作流执行 `assemblePublicDebug`，校验 APK 只包含 `arm64-v8a` 原生库，再上传调试产物。正式签名和发布在本机完成，见 [发版流程](./release.md)。
 
 ## 代码规范速查
 

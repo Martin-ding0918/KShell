@@ -25,7 +25,7 @@
 5. 将源码提交到 fork 的 `main`。在 [KShell Releases](https://github.com/Martin-ding0918/KShell/releases) 创建指向该源码提交的 `v<版本>`，上传该 ARM64 APK 和对应 SHA-256 校验文件。
 6. 发布后检查稳定版更新地址 `releases/latest` 是否指向本次版本，并核对 GitHub 上的 APK SHA-256。
 
-CI 可以构建和校验 ARM64 产物，GitHub Release 仍手动发布。
+CI 构建和校验 ARM64 调试包。GitHub Release 使用本机签名并通过实机验收的正式 APK。
 0.0.1.11 及更早的公开 APK 使用的 KShell-public 仓库已归档。使用这些版本时，可从主仓库下载最新 ARM64 APK，直接覆盖安装。
 
 ## 控制台实机冒烟
