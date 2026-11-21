@@ -16,7 +16,7 @@ npm install                                  # 根目录：全部 workspace + np
 npx vitest run                               # core-shell 单元测试
 cd apps/mobile/android && ./gradlew assembleDebug     # 调试包
 cd apps/mobile/android && ./gradlew assemblePublicRelease # 发布包（JS 已内置，可独立运行）
-cd apps/mobile && npm start                  # Metro（仅调试包需要）
+cd apps/mobile && npm start                  # Metro（调试包热更新）
 ```
 
 设置 `CHROME_PATH` 指向 Chrome 或 Chromium 后，可在仓库根目录运行
@@ -31,14 +31,36 @@ cd apps/mobile && npm start                  # Metro（仅调试包需要）
 `apps/mobile/android/app/build/outputs/apk/public/release/`，文件名为
 `KShell-<版本>-arm64-v8a-publicRelease.apk`。
 
-ARM64 模拟器调试（本机 MuMu 约定端口 16512）：
+## 小米 17 真机调试（Windows + USB）
 
-```bash
-adb connect 127.0.0.1:16512
-adb -s 127.0.0.1:16512 reverse tcp:8081 tcp:8081     # 调试包需要
-adb -s 127.0.0.1:16512 install -r <apk>
-adb -s 127.0.0.1:16512 shell am start -n io.github.martinding0918.kshell.debug/com.zshell.MainActivity
-```
+1. 在小米 17 开启「开发者选项」里的「USB 调试」，用数据线连接电脑。在手机上允许这台电脑调试。在仓库根目录运行 `adb devices -l`，确认手机状态为 `device`，并记下第一列序列号。如果显示 `unauthorized`，解锁手机并确认授权弹窗。
+2. 准备一个 ARM64 调试 APK。可从 [Android Actions](https://github.com/Martin-ding0918/KShell/actions/workflows/android.yml) 成功运行的 **Artifacts** 下载 `kshell-arm64-debug-apk` 并解压。需要验证还未推送的原生改动时，在已安装依赖的仓库中用 PowerShell 本地构建。
+
+   ```powershell
+   Push-Location apps/mobile/android
+   .\gradlew.bat assemblePublicDebug
+   Pop-Location
+   ```
+
+   本地 APK 位于 `apps/mobile/android/app/build/outputs/apk/public/debug/`，文件名为 `KShell-<版本>-public-arm64-v8a-publicDebug.apk`。调试包使用独立包名 `io.github.martinding0918.kshell.debug`，可和正式版并排安装，配对和登录状态各自保存。
+3. 在承载当前源码和依赖的 checkout 中启动 Metro，并保持终端运行。若使用本地盘构建副本，先把要测的改动同步过去，再从该副本启动 Metro。
+
+   ```powershell
+   Set-Location apps/mobile
+   npm start
+   ```
+
+4. 在另一个 PowerShell 窗口安装并启动调试包。将下面的序列号和路径换成实测值；路径应指向解压后的 `.apk`。
+
+   ```powershell
+   $serial = '手机序列号'
+   $apk = 'C:\path\to\KShell-debug.apk'
+   adb -s $serial reverse tcp:8081 tcp:8081
+   adb -s $serial install -r $apk
+   adb -s $serial shell am start -n io.github.martinding0918.kshell.debug/com.zshell.MainActivity
+   ```
+
+5. 修改并保存 JS、TS 或 TSX，查看手机上的 Fast Refresh 结果。需要整页重载时，在 Metro 终端按 `r`。如果手机仍显示旧代码，先用 `adb -s $serial reverse --list` 检查 `tcp:8081` 转发，再重载并查看 Metro 是否收到打包请求。当前调试 APK 也内置构建时的 JS，能打开 App 这一点不足以确认已连上 Metro。换线或重连后可重新执行端口转发。改动 Kotlin、Java、Android 资源或原生依赖后，重新构建并覆盖安装调试 APK。
 
 ## 已知坑与解法（务必先读）
 

@@ -23,14 +23,7 @@ cd apps/mobile/android && ./gradlew assembleDebug   # Android 调试包
 cd apps/mobile && npm start                  # Metro（开发时 JS 热载）
 ```
 
-MuMu 模拟器调试（本机约定端口 16512）：
-
-```bash
-adb connect 127.0.0.1:16512
-adb -s 127.0.0.1:16512 reverse tcp:8081 tcp:8081
-adb -s 127.0.0.1:16512 install -r <apk路径>
-adb -s 127.0.0.1:16512 shell am start -n io.github.martinding0918.kshell.debug/com.zshell.MainActivity
-```
+开发调试使用小米 17，参见 [真机调试步骤](docs/build.md#小米-17-真机调试windows--usb)。
 
 ## 硬约束（违反会导致构建损坏或合规风险）
 
@@ -73,5 +66,5 @@ adb -s 127.0.0.1:16512 shell am start -n io.github.martinding0918.kshell.debug/c
       且与 `apps/mobile/src/legal.ts`（应用内展示版）同步；实质性变更时提升
       `LEGAL_DOC_VERSION` 触发重新征求同意
 - [ ] CHANGELOG.md 已添加对应版本段落，GitHub Release 说明使用该段落
-- [ ] MuMu 或真机冒烟：配对 → 控制台 → 收藏 → 锁屏
+- [ ] Android 真机冒烟：配对 → 控制台 → 收藏 → 锁屏
 - [ ] 用待发布 APK 完成 Kimi Code 和 ZCode 的[控制台实机冒烟](./docs/release.md#控制台实机冒烟)。
