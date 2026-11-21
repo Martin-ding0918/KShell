@@ -94,6 +94,23 @@ grep foojay node_modules/@react-native/gradle-plugin/settings.gradle.kts   # 应
 - npm：仓库 lock 文件统一使用官方注册表地址（CI 与贡献者兼容）；
   本机可用 npmmirror，但**不要**把镜像地址提交进 lock
 
+### 真机 UI 自动化与 adb（Windows Git Bash + HyperOS）
+
+以下均来自 2026-11-21 真机冒烟实测，脚本或 AI 驱动真机时逐条对照：
+
+- `adb install` 报 `INSTALL_FAILED_USER_RESTRICTED`：HyperOS 开发者选项的
+  「USB 安装」开关未开。开关打开后每次安装仍会在手机上弹确认框，超时自动取消。
+- Git Bash 调 adb 时，远端绝对路径会被 MSYS 转换成
+  `C:/Program Files/Git/...`（如 `/sdcard/x.mp4`）：整条远端命令放进引号
+  （`adb shell "screenrecord ... /data/local/tmp/x.mp4"`），个别参数再配
+  `MSYS_NO_PATHCONV=1`；给 adb.exe 的**本地**路径用 Windows 形式（adb 不认 `/tmp/...`）。
+- HyperOS 对 shell 用户禁写 `/sdcard`：`screenrecord` 落盘用 `/data/local/tmp/`，
+  录完及时 pull 并删除。screenrecord 失败时可能**静默不产出文件**（退出码 0）——
+  录完先 `ls` 确认文件存在再依赖。
+- `input tap` 坐标与 `screencap` PNG 像素一一对应（全分辨率，如 1220x2656）。
+  脚本驱动 UI 时**每步操作前先 screencap 确认当前页面再点**：应用退到桌面、
+  页面跳转或 relay 断开后旧坐标立即失效——实测曾因沿用旧坐标在桌面误触其他应用。
+
 ## CI（GitHub Actions）
 
 `.github/workflows/android.yml` 在主分支推送或手动触发时运行 Vitest、移动端类型检查和 Jest。
