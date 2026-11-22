@@ -1,4 +1,5 @@
 import type {ConsoleStatus} from '@zshell/core-shell';
+import type {ColorScheme, Palette} from './theme';
 import {INSTALL_TOPBAR_ACTIVITY} from './topbarActivity.ts';
 
 export type ZcodePage = 'other' | 'home' | 'chat';
@@ -34,7 +35,11 @@ export function shouldShowZcodeFooter(page: ZcodePage, status: ConsoleStatus, lo
 //
 // The same script is injected twice (`beforeContentLoaded` and after load);
 // the second run reuses the first observer through `__zshellRefreshZcodeTopbar`.
-export const ZCODE_TOPBAR_PATCH = String.raw`(function () {
+export function buildZcodeTopbarPatch(
+  colors: Record<ColorScheme, Pick<Palette, 'consoleBg' | 'consoleHeaderBg'>>,
+): string {
+  const {light, dark} = colors;
+  return String.raw`(function () {
   'use strict';
   try {
     if (!/^(zcode\.z\.ai|zcode\.chatglm\.site)$/.test(location.hostname)) return;
@@ -55,6 +60,9 @@ export const ZCODE_TOPBAR_PATCH = String.raw`(function () {
     var paneOverlay = '[data-mobile-side-pane-overlay]';
     var style = document.createElement('style');
     style.textContent = [
+      // Match Kimi's rendered surfaces while following ZCode's own color-scheme.
+      'html[data-zshell-zcode-topbar] ' + chatSection + '{background-color:light-dark(${light.consoleBg},${dark.consoleBg})}',
+      'html[data-zshell-zcode-topbar] ' + chatSection + ' > [data-zshell-zc-row]{background-color:light-dark(${light.consoleHeaderBg},${dark.consoleHeaderBg})}',
       // The page's own h-11 mobile header row becomes the single 48px row.
       '[data-zshell-zc-row]{position:relative;justify-content:flex-start;gap:4px;padding:0 8px 0 12px!important;height:48px!important;min-height:48px!important;max-height:48px!important;overflow:hidden}',
       // Static "task console" caption and the original back-home arrow (it
@@ -331,3 +339,4 @@ export const ZCODE_TOPBAR_PATCH = String.raw`(function () {
     post('zshell:topbar-activity-ready');
   } catch (_) { /* Leave the original controls available. */ }
 })();`;
+}

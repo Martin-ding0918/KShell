@@ -4,7 +4,12 @@ import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {shouldShowZcodeFooter, ZCODE_TOPBAR_PATCH} from '../src/zcodeTopbar.ts';
+import {buildZcodeTopbarPatch, shouldShowZcodeFooter} from '../src/zcodeTopbar.ts';
+
+const topbarPatch = buildZcodeTopbarPatch({
+  light: {consoleBg: '#ffffff', consoleHeaderBg: '#f7f7f7'},
+  dark: {consoleBg: '#121212', consoleHeaderBg: '#1c1c1c'},
+});
 
 for (const status of ['connecting', 'connected', 'waiting']) {
   assert.equal(shouldShowZcodeFooter('other', status, false), false,
@@ -51,6 +56,15 @@ const fixture = function (install) {
       !!shell('data-zshell-zc-sidebar') && !!shell('data-zshell-zc-title'),
       'all shell controls attached');
     check(Math.round(box(row()).height) === 48, 'row compacted to 48px');
+    const background = element => getComputedStyle(element).backgroundColor;
+    check(background(section()) === 'rgb(255, 255, 255)' &&
+      background(row()) === 'rgb(247, 247, 247)', 'chat uses Kimi light surfaces');
+    document.documentElement.classList.add('dark');
+    await frame();
+    check(background(section()) === 'rgb(18, 18, 18)' &&
+      background(row()) === 'rgb(28, 28, 28)', 'chat follows the page dark theme');
+    document.documentElement.classList.remove('dark');
+    await frame();
     check(box(document.querySelector('#static-title')).height === 0, 'static caption hidden');
     const header = document.querySelector('[data-testid="workspace-header"]');
     check(box(header).height === 0 && getComputedStyle(header).visibility === 'hidden',
@@ -168,6 +182,7 @@ const fixture = function (install) {
     document.body.appendChild(home);
     await frame();
     check(posted('zshell:zcode-home'), 'home page announces home');
+    check(background(home) === 'rgb(248, 248, 248)', 'task home keeps its own background');
     check(!document.querySelector('.zshell-status'), 'shell controls removed on home');
     home.remove();
     document.body.appendChild(original);
@@ -197,7 +212,10 @@ try {
   writeFileSync(html, `<!doctype html><meta charset="utf-8">
     <style>
       body {margin: 0}
+      html {color-scheme: light}
+      html.dark {color-scheme: dark}
       section {width: 390px}
+      section[data-mobile-page] {background-color: light-dark(#f8f8f8, #161616)}
       .row {display:flex; height:44px; align-items:center; box-sizing:border-box}
       header[data-testid] {display:flex; height:48px; align-items:center; box-sizing:border-box}
       h1 {margin: 0; min-width: 0}
@@ -216,7 +234,7 @@ try {
       <main data-mobile-chat-surface></main>
     </section>
     <output>TEST DID NOT FINISH</output><script>
-      (${fixture.toString()})(() => new Function('location', ${JSON.stringify(ZCODE_TOPBAR_PATCH)})({
+      (${fixture.toString()})(() => new Function('location', ${JSON.stringify(topbarPatch)})({
         hostname: 'zcode.z.ai', pathname: '/remote/v4'
       }));
     </script>`);

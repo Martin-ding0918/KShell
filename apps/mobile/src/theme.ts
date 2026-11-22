@@ -9,6 +9,7 @@ export interface Palette {
   scheme: ColorScheme;
   bg: string;
   consoleBg: string;
+  consoleHeaderBg: string;
   bgElevated: string;
   /** Inset panels nested in a card (expanded actions, code blocks). */
   bgSunken: string;
@@ -48,6 +49,7 @@ const dark: Palette = {
   scheme: 'dark',
   bg: '#161616',
   consoleBg: '#121212',
+  consoleHeaderBg: '#1c1c1c',
   bgElevated: '#212121',
   bgSunken: '#1b1b1b',
   bgElevatedOverlay: 'rgba(33, 33, 33, 0.88)',
@@ -79,6 +81,7 @@ const light: Palette = {
   scheme: 'light',
   bg: '#f4f5f7',
   consoleBg: '#ffffff',
+  consoleHeaderBg: '#f7f7f7',
   bgElevated: '#ffffff',
   bgSunken: '#f7f8fa',
   bgElevatedOverlay: 'rgba(255, 255, 255, 0.92)',

@@ -32,7 +32,7 @@ import {
 } from '@zshell/core-shell';
 import {buildPatchSource} from '@zshell/patch-bundle';
 import {buildKimiThemePrelude, KIMI_TOPBAR_PATCH} from '../kimiTopbar';
-import {shouldShowZcodeFooter, ZCODE_TOPBAR_PATCH, type ZcodePage} from '../zcodeTopbar';
+import {buildZcodeTopbarPatch, shouldShowZcodeFooter, type ZcodePage} from '../zcodeTopbar';
 import {observeKimiLogin} from '../consoleLogin';
 import {formatConsoleAttempt, type ConsoleAttempt, type ConsoleFailure} from '../consoleAttempt';
 import {logDiag} from '../diagnostics';
@@ -41,6 +41,7 @@ import {loadPrefs, notifications} from '../notifications';
 import {makeStyles, Palette, palettes, radius, useTheme} from '../theme';
 
 const kimiConsoleColors = {dark: palettes.dark.consoleBg, light: palettes.light.consoleBg};
+const zcodeTopbarPatch = buildZcodeTopbarPatch(palettes);
 
 // 优先等待 first-contentful-paint；不支持或未上报时用双 rAF 兜底。
 const FIRST_PAINT_PROBE = String.raw`(function () {
@@ -192,7 +193,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       (isKimi ? buildKimiThemePrelude(colors.scheme, kimiConsoleColors) : '') +
       buildPatchSource() +
       (isKimi ? '\n' + KIMI_TOPBAR_PATCH : '') +
-      (isZcode ? '\n' + ZCODE_TOPBAR_PATCH : ''),
+      (isZcode ? '\n' + zcodeTopbarPatch : ''),
     [isKimi, isZcode, colors.scheme],
   );
   const statusDetails = useMemo(() => statusMeta(status, colors), [status, colors]);
@@ -546,7 +547,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         injectedJavaScriptBeforeContentLoaded={patchSource}
         injectedJavaScript={
           FIRST_PAINT_PROBE +
-          (isKimi ? KIMI_TOPBAR_PATCH : isZcode ? ZCODE_TOPBAR_PATCH : '') +
+          (isKimi ? KIMI_TOPBAR_PATCH : isZcode ? zcodeTopbarPatch : '') +
           '\ntrue;'
         }
         javaScriptEnabled
