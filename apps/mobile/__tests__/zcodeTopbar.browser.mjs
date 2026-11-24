@@ -11,12 +11,10 @@ const topbarPatch = buildZcodeTopbarPatch({
   dark: {consoleBg: '#121212', consoleHeaderBg: '#1c1c1c'},
 });
 
-for (const status of ['connecting', 'connected', 'waiting']) {
+for (const status of ['connecting', 'connected', 'waiting', 'disconnected', 'kicked']) {
   assert.equal(shouldShowZcodeFooter('other', status, false), false,
     `startup has no footer when the bridge reports ${status}`);
 }
-assert.equal(shouldShowZcodeFooter('other', 'disconnected', false), true);
-assert.equal(shouldShowZcodeFooter('other', 'kicked', false), true);
 assert.equal(shouldShowZcodeFooter('other', 'connecting', true), true);
 assert.equal(shouldShowZcodeFooter('home', 'connected', false), false);
 assert.equal(shouldShowZcodeFooter('chat', 'disconnected', false), false);

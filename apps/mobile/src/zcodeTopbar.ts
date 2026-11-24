@@ -4,9 +4,8 @@ import {INSTALL_TOPBAR_ACTIVITY} from './topbarActivity.ts';
 
 export type ZcodePage = 'other' | 'home' | 'chat';
 
-export function shouldShowZcodeFooter(page: ZcodePage, status: ConsoleStatus, loadFailed: boolean): boolean {
-  // A relay socket can open before the page finishes device authentication.
-  return loadFailed || (page === 'other' && (status === 'disconnected' || status === 'kicked'));
+export function shouldShowZcodeFooter(_page: ZcodePage, _status: ConsoleStatus, loadFailed: boolean): boolean {
+  return loadFailed;
 }
 
 // Compact ZCode console topbar: merges the four stacked toolbars (the shell's
@@ -31,7 +30,7 @@ export function shouldShowZcodeFooter(page: ZcodePage, status: ConsoleStatus, lo
 // menu trigger collapses the same way inside the row.
 // Any missed anchor restores the original layout (forget()) and announces
 // header-off. The task home reports 'zshell:zcode-home'. Outside both views,
-// the native footer is reserved for connection failures, not startup.
+// the native footer is reserved for page load failures, never startup or relay status.
 //
 // The same script is injected twice (`beforeContentLoaded` and after load);
 // the second run reuses the first observer through `__zshellRefreshZcodeTopbar`.
