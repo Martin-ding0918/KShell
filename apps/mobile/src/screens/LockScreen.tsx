@@ -57,6 +57,7 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
   const [now, setNow] = useState(Date.now);
   const [verifying, setVerifying] = useState(false);
   const pending = useRef(false);
+  const biometricInFlight = useRef(false);
   const mounted = useRef(true);
   const remaining = Math.max(0, Math.ceil((attempts.retryAt - now) / 1000));
 
@@ -93,33 +94,38 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
     let cancelled = false;
     let prompted = false;
     const promptOnce = async () => {
-      if (prompted || cancelled) {
+      if (prompted || cancelled || biometricInFlight.current || AppState.currentState !== 'active') {
         return;
       }
-      const r = await biometricAuth.isAvailable();
-      if (cancelled) {
-        return;
-      }
-      setBioType(r.type);
-      if (!r.available) {
-        setError(`${biometricLabel(r.type)}不可用，请使用备用方式解锁`);
-        if (secrets.length > 0) {
-          setMode(secrets[0]);
+      biometricInFlight.current = true;
+      try {
+        const r = await biometricAuth.isAvailable();
+        if (cancelled || AppState.currentState !== 'active') {
+          return;
         }
-        return;
-      }
-      prompted = true;
-      const ok = await biometricAuth.prompt('验证身份以打开 KShell');
-      if (cancelled) {
-        return;
-      }
-      if (ok) {
-        unlock();
-      } else {
-        setError(`${biometricLabel(r.type)}验证未通过`);
-        if (secrets.length > 0) {
-          setMode(secrets[0]);
+        setBioType(r.type);
+        if (!r.available) {
+          setError(`${biometricLabel(r.type)}不可用，请使用备用方式解锁`);
+          if (secrets.length > 0) {
+            setMode(secrets[0]);
+          }
+          return;
         }
+        prompted = true;
+        const ok = await biometricAuth.prompt('验证身份以打开 KShell');
+        if (cancelled) {
+          return;
+        }
+        if (ok) {
+          if (AppState.currentState === 'active') unlock();
+        } else {
+          setError(`${biometricLabel(r.type)}验证未通过`);
+          if (secrets.length > 0) {
+            setMode(secrets[0]);
+          }
+        }
+      } finally {
+        biometricInFlight.current = false;
       }
     };
     const startPrompt = () => promptOnce().catch(() => {
@@ -193,18 +199,22 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
           <TouchableOpacity
             style={styles.button}
             onPress={async () => {
+              if (biometricInFlight.current || AppState.currentState !== 'active') return;
+              biometricInFlight.current = true;
               setError(null);
               try {
                 const ok = await biometricAuth.prompt('验证身份以打开 KShell');
                 if (!mounted.current) return;
                 if (ok) {
-                  unlock();
+                  if (AppState.currentState === 'active') unlock();
                 } else {
                   setError(`${biometricLabel(bioType)}验证未通过`);
                   if (secrets.length > 0) setMode(secrets[0]);
                 }
               } catch {
                 if (mounted.current) setError('生物识别暂不可用');
+              } finally {
+                biometricInFlight.current = false;
               }
             }}>
             <Text style={styles.buttonText}>

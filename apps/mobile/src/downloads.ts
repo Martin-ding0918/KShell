@@ -21,10 +21,12 @@ export interface DownloadItem {
   totalBytes: number;
   /** Translated reason, present when status is 'failed' or 'paused'. */
   reason?: string;
+  /** Optional expected SHA-256 hex digest for update APK downloads. */
+  sha256?: string;
 }
 
 interface DownloadsNativeModule {
-  download(url: string, fileName: string, kind: string): Promise<number>;
+  download(url: string, fileName: string, kind: string, expectedSha256: string | null): Promise<number>;
   queryDownloads(): Promise<DownloadItem[]>;
   removeDownload(id: number): Promise<void>;
   resumeDownload(id: number): Promise<number>;
@@ -51,6 +53,7 @@ export async function startUpdateDownload(release: ReleaseInfo): Promise<number>
     release.apkUrl,
     `zshell-update-${release.version}.apk`,
     'update',
+    release.apkSha256 ?? null,
   );
 }
 
@@ -61,7 +64,7 @@ export function clearWebSession(): Promise<boolean> {
 
 /** Re-enqueue a failed download we still know the URL of. */
 export function retryDownload(item: DownloadItem): Promise<number> {
-  return module().download(item.url, item.name, item.kind);
+  return module().download(item.url, item.name, item.kind, item.sha256 ?? null);
 }
 
 export function queryDownloads(): Promise<DownloadItem[]> {

@@ -61,6 +61,10 @@ describe('deriveConsoleStatus', () => {
     expect(s).toBe('kicked');
     s = deriveConsoleStatus(s, ev('ws-error'));
     expect(s).toBe('kicked');
+    s = deriveConsoleStatus(s, ev('pair-status', {status: 'matched'}));
+    expect(s).toBe('kicked');
+    s = deriveConsoleStatus(s, ev('pair-status', {status: 'waiting'}));
+    expect(s).toBe('kicked');
     // A fresh socket connection clears it (user pressed reconnect).
     s = deriveConsoleStatus(s, ev('ws-connected'));
     expect(s).toBe('connected');

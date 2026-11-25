@@ -128,6 +128,34 @@ describe('applock multi-method model', () => {
     expect(
       deserializeLockConfig('{"enabled":true,"methods":{"biometric":"yes"}}'),
     ).toBeNull();
+    expect(
+      deserializeLockConfig(JSON.stringify({
+        enabled: true,
+        methods: {
+          biometric: false,
+          pattern: {saltHex: 'short', hashHex: 'deadbeef', iterations: 20000},
+          password: null,
+        },
+      })),
+    ).toBeNull();
+    expect(
+      deserializeLockConfig(JSON.stringify({
+        enabled: true,
+        methods: {
+          biometric: false,
+          pattern: {saltHex: '000102030405060708090a0b0c0d0e0f', hashHex: 'deadbeef', iterations: 0},
+          password: null,
+        },
+      })),
+    ).toBeNull();
+    expect(
+      deserializeLockConfig(JSON.stringify({
+        enabled: true,
+        method: 'pattern',
+        secretKind: 'pattern',
+        verifier: {saltHex: 'not-hex', hashHex: 'deadbeef', iterations: -1},
+      })),
+    ).toBeNull();
   });
 
   it('patternToString joins dot order', () => {

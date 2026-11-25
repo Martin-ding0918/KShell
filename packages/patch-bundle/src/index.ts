@@ -73,6 +73,11 @@ export const WS_OBSERVER_PATCH_SOURCE = String.raw`(function () {
   var FLAG = '__zshellWsObserver';
   try {
     if (typeof window === 'undefined' || window[FLAG]) { return; }
+    if (typeof location === 'undefined' || location.protocol !== 'https:' ||
+        !/^(code-rc\.kimi\.(com|ai)|zcode\.z\.ai|zcode\.chatglm\.site)$/i.test(location.hostname)) {
+      window[FLAG] = 'probe:no-op';
+      return;
+    }
     var NativeWS = window.WebSocket;
     if (typeof NativeWS !== 'function') { return; }
     var post = function (type, detail) {
@@ -84,33 +89,55 @@ export const WS_OBSERVER_PATCH_SOURCE = String.raw`(function () {
         }
       } catch (e) { /* never break the page */ }
     };
-    // Signals must come from actual JSON frames: chat text that merely
-    // contains a word like KICKED must never flip the console status.
-    function isJsonObject(data) {
-      if (typeof data !== 'string' || data.length === 0) { return false; }
-      try {
-        var parsed = JSON.parse(data);
-        return typeof parsed === 'object' && parsed !== null;
-      } catch (e) { return false; }
+    function isPlainObject(v) {
+      return typeof v === 'object' && v !== null && !Array.isArray(v);
     }
+    function isKickedObj(o) {
+      return o.type === 'KICKED' || o.event === 'KICKED' || o.code === 'KICKED' || o.error === 'KICKED';
+    }
+    function pairStatusOf(o) {
+      if (typeof o.pair_status === 'string') { return o.pair_status; }
+      if (o.type === 'pair_status' && typeof o.status === 'string') { return o.status; }
+      return null;
+    }
+    function isApprovalObj(o) {
+      var v = o.type || o.method || o.event;
+      return v === 'permission_request' || v === 'elicitation_request';
+    }
+    // Signals must come from structured protocol fields in JSON object frames,
+    // never from chat text or arbitrary JSON arrays. Returns true when a
+    // recognized control signal was observed (used to identify the primary socket).
     function signalFromMessage(data) {
       try {
-        if (typeof data !== 'string') { return; }
-        var kicked = data.indexOf('"KICKED"') !== -1;
-        var pair = data.indexOf('"pair_status"') !== -1;
-        var approval = data.indexOf('"permission_request"') !== -1 ||
-            data.indexOf('"elicitation_request"') !== -1;
-        if ((!kicked && !pair && !approval) || !isJsonObject(data)) { return; }
-        if (kicked) {
+        if (typeof data !== 'string' || data.length === 0) { return false; }
+        var msg = JSON.parse(data);
+        if (!isPlainObject(msg)) { return false; }
+        var nested = isPlainObject(msg.payload) ? msg.payload : (isPlainObject(msg.data) ? msg.data : null);
+        if (isKickedObj(msg) || (nested && isKickedObj(nested))) {
           post('kicked', {});
-          return;
+          return true;
         }
-        var m = pair && /"pair_status"\s*:\s*"([^"]+)"/.exec(data);
-        if (m) { post('pair-status', { status: m[1] }); }
-        if (approval) {
+        var seen = false;
+        var ps = pairStatusOf(msg) || (nested ? pairStatusOf(nested) : null);
+        if (ps) {
+          post('pair-status', { status: ps });
+          seen = true;
+        }
+        if (isApprovalObj(msg) || (nested && isApprovalObj(nested))) {
           post('approval-waiting', {});
+          seen = true;
         }
-      } catch (e) { /* ignore malformed frames */ }
+        return seen;
+      } catch (e) { return false; /* ignore malformed frames */ }
+    }
+    var openSockets = [];
+    var primaryWs = null;
+    function addOpen(ws) {
+      if (openSockets.indexOf(ws) === -1) { openSockets.push(ws); }
+    }
+    function removeOpen(ws) {
+      var idx = openSockets.indexOf(ws);
+      if (idx !== -1) { openSockets.splice(idx, 1); }
     }
     function WrappedWS(url, protocols) {
       var ws = (protocols === undefined)
@@ -120,19 +147,38 @@ export const WS_OBSERVER_PATCH_SOURCE = String.raw`(function () {
       // the official console hosts directly); Kimi Code remote-control pages
       // tunnel through wss://code-rc.kimi.com|ai hosts.
       // Read-only observer — widening the match has no page-visible effect.
-      var isRelay = typeof url === 'string' &&
-        (url.indexOf('/ws') !== -1 ||
-          /^wss?:\/\/code-rc\.kimi\.(com|ai)\//i.test(url) ||
-          /^wss?:\/\/(zcode\.z\.ai|zcode\.chatglm\.site)\//i.test(url));
+      var urlStr = typeof url === 'string'
+        ? url
+        : (url && typeof url.href === 'string' ? url.href : '');
+      var isRelay = urlStr.length > 0 &&
+        (urlStr.indexOf('/ws') !== -1 ||
+          /^wss?:\/\/code-rc\.kimi\.(com|ai)\//i.test(urlStr) ||
+          /^wss?:\/\/(zcode\.z\.ai|zcode\.chatglm\.site)\//i.test(urlStr));
       if (isRelay) {
-        post('ws-open', {});
-        ws.addEventListener('open', function () { post('ws-connected', {}); });
-        ws.addEventListener('close', function (ev) {
-          post('ws-closed', { code: ev.code });
+        if (openSockets.length === 0) {
+          post('ws-open', {});
+        }
+        ws.addEventListener('open', function () {
+          addOpen(ws);
+          post('ws-connected', {});
         });
-        ws.addEventListener('error', function () { post('ws-error', {}); });
+        ws.addEventListener('close', function (ev) {
+          removeOpen(ws);
+          var wasPrimary = (primaryWs === ws);
+          if (wasPrimary) { primaryWs = null; }
+          if (wasPrimary || openSockets.length === 0) {
+            post('ws-closed', { code: ev.code });
+          }
+        });
+        ws.addEventListener('error', function () {
+          if (primaryWs === ws || openSockets.length === 0) {
+            post('ws-error', {});
+          }
+        });
         ws.addEventListener('message', function (ev) {
-          signalFromMessage(ev.data);
+          if (signalFromMessage(ev.data)) {
+            primaryWs = ws;
+          }
         });
       }
       return ws;
@@ -145,7 +191,7 @@ export const WS_OBSERVER_PATCH_SOURCE = String.raw`(function () {
       WrappedWS.CLOSED = NativeWS.CLOSED;
     } catch (e) { /* constants are best-effort */ }
     window.WebSocket = WrappedWS;
-    window[FLAG] = 'ws-observer:v2';
+    window[FLAG] = 'ws-observer:v4';
     window.addEventListener('online', function () { post('network-online', {}); });
     window.addEventListener('offline', function () { post('network-offline', {}); });
   } catch (e) { /* patches must never break the page */ }
@@ -174,16 +220,36 @@ export const ABORT_SIGNAL_PATCH_SOURCE = String.raw`(function () {
     if (typeof AbortSignal.any === 'function' || window[FLAG]) { return; }
     AbortSignal.any = function (signals) {
       var controller = new AbortController();
-      for (var i = 0; i < signals.length; i++) {
-        (function (s) {
-          if (s == null || typeof s.addEventListener !== 'function') { return; }
-          if (s.aborted) { controller.abort(s.reason); return; }
-          s.addEventListener('abort', function () { controller.abort(s.reason); }, { once: true });
-        })(signals[i]);
+      var list = Array.from(signals);
+      var cleanups = [];
+      var cleanup = function () {
+        for (var j = 0; j < cleanups.length; j++) {
+          cleanups[j]();
+        }
+        cleanups.length = 0;
+      };
+      for (var i = 0; i < list.length; i++) {
+        var s = list[i];
+        if (s == null || typeof s.addEventListener !== 'function') { continue; }
+        if (s.aborted) {
+          cleanup();
+          controller.abort(s.reason);
+          return controller.signal;
+        }
+        (function (sig) {
+          var onAbort = function () {
+            cleanup();
+            controller.abort(sig.reason);
+          };
+          sig.addEventListener('abort', onAbort, { once: true });
+          cleanups.push(function () {
+            sig.removeEventListener('abort', onAbort);
+          });
+        })(s);
       }
       return controller.signal;
     };
-    window[FLAG] = 'abort-any:v1';
+    window[FLAG] = 'abort-any:v2';
   } catch (e) { /* patches must never break the page */ }
 })();`;
 

@@ -47,9 +47,10 @@ KShell 的 WebView 加载官方远程控制台——Kimi Code（`code-rc.kimi.co
 
 补丁以 JS 字符串形式导出（`packages/patch-bundle`），与宿主框架无关，`buildPatchSource()`
 全量拼接后统一注入。当前补丁：P-1 matchMedia 移动端输入判定、P-2 relay WebSocket
-只读观察器（Kimi 远程控制隧道走 `wss://code-rc.kimi.com|ai`，ZCode relay 走
+只读观察器（带官方 HTTPS 宿主探针，解析结构化 JSON 协议字段并兼容多连接并存，Kimi
+远程控制隧道走 `wss://code-rc.kimi.com|ai`，ZCode relay 走
 `zcode.z.ai|zcode.chatglm.site` 或带 `/ws` 的 socket）、P-3
-`AbortSignal.any` polyfill（Kimi Code 登录依赖它，模拟器/容器常见的旧版系统 WebView
+`AbortSignal.any` polyfill（支持任意 Iterable 并在触发后清理剩余监听器，Kimi Code 登录依赖它，模拟器/容器常见的旧版系统 WebView
 没有）、P-4 `Promise.withResolvers` polyfill（旧 WebView 缺失时会话与工作区列表
 打不开）。P-3/P-4 在环境已原生支持时自动不注入。
 
@@ -62,7 +63,7 @@ zcodeTopbar 把 ZCode 会话页原本的四条栏（原生壳条 + 网页 mobile
 `data-testid`），原按钮保留原处理器仅改 flex order，工作区头部行收缩为零高隐形盒
 （Radix 弹层仍可从胶囊菜单转发触发）。
 所需锚点缺失时，补丁恢复网页原布局并上报 `header-off`。ZCode 加载失败时显示原生状态条。在会话页和任务列表之外，断线或会话被顶下线时也会显示原生状态条。
-两个补丁共用 `apps/mobile/src/topbarActivity.ts`。控制台可见时，DOM 观察器、SPA 路由回调和每 1.2 秒的兜底扫描共同维护顶栏。退回列表、打开下载管理、锁定应用或切后台时，壳通知隐藏的页面断开 DOM 观察器并停止定时扫描。再次显示时立即补扫，同时恢复观察和兜底扫描。
+两个补丁共用 `apps/mobile/src/topbarActivity.ts`。控制台可见时，DOM 观察器（忽略 `<main>` 内的流式聊天文本变更，减少重排开销）、SPA 路由回调和每 1.2 秒的兜底扫描共同维护顶栏。退回列表、打开下载管理、锁定应用或切后台时，壳通知隐藏的页面断开 DOM 观察器并停止定时扫描。再次显示时立即补扫，同时恢复观察和兜底扫描。
 
 ZCode 支持于 0.0.1.8 移除、0.0.1.12 恢复：配对（扫码/手动链接/备份恢复）与控制台
 回到 core-shell 既有逻辑，入口策略闸门在 `apps/mobile/src/storage.ts` 的
@@ -100,5 +101,5 @@ App.tsx 用栈状态自管理导航（未引入 react-navigation，保持依赖�
 JS 侧 `ThemeProvider` 按偏好或 `useColorScheme()` 选调色板，样式用
 `makeStyles` 按方案缓存生成。
 
-控制台直接导航到目标页面，等待时由 React Native 遮罩覆盖 WebView。网页探针优先等到首次内容绘制（FCP），在信号不可用时使用双 `requestAnimationFrame`，然后上报 `zshell:first-paint`。`patches/rn-webview-kshell.patch` 对官方 HTTPS 控制台的这条消息等待 Android WebView 的 `postVisualStateCallback` 及后续绘制帧，再转发给 React Native 撤下遮罩。15 秒内收不到信号时显示超时页，用户可以重试、返回列表或复制本次诊断摘要。
+控制台直接导航到目标页面，等待时由 React Native 遮罩覆盖 WebView。网页探针优先等到首次内容绘制（FCP），在信号不可用时使用双 `requestAnimationFrame`，然后上报 `zshell:first-paint`。`patches/rn-webview-kshell.patch` 将 `WebMessageListener` 限定为官方控制台 HTTPS Origin 且仅放行主框架（旧版无 `WebMessageListener` 的 WebView 不暴露可被子框架伪造的 `JavascriptInterface` 回退桥），并对 `zshell:first-paint` 等待 Android WebView 的 `postVisualStateCallback` 及后续绘制帧，按同源 Origin 校验后再转发给 React Native 撤下遮罩（兼容 SPA 路由重定向）。15 秒内收不到信号时显示超时页，用户可以重试、返回列表或复制本次诊断摘要。
 

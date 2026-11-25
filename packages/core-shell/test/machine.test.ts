@@ -246,4 +246,51 @@ describe('MachineRegistry', () => {
     // 坏 kind 的记录被跳过，未占用 id。
     expect(reg.size).toBe(3);
   });
+
+  it('rejects kimi path-traversal sid, strips bad field types, and repairs corrupted counters', () => {
+    const {reg} = fakeRegistry();
+    const res = reg.importMachines([
+      {
+        name: 'Traversal',
+        credentials: {
+          sid: '..',
+          hash: '',
+          origin: 'https://code-rc.kimi.com',
+          kind: 'kimi',
+        },
+      },
+      {
+        name: 'Bad appVersion',
+        credentials: {
+          sid: 'sid-clean',
+          hash: '',
+          origin: 'https://zcode.z.ai',
+          appVersion: 12345,
+          mid: {nested: true},
+          deviceName: ['x'],
+          issuedAt: 'nope',
+        },
+      },
+    ]);
+    expect(res).toEqual({added: 1, updated: 0});
+    const m = reg.get('m1')!;
+    expect(m.credentials.appVersion).toBeNull();
+    expect(m.credentials.mid).toBeNull();
+    expect(m.credentials.deviceName).toBeNull();
+    expect(m.credentials.issuedAt).toBeNull();
+
+    // Corrupt nextId / nextSortOrder in persisted JSON should be recomputed safely.
+    const corrupt = JSON.stringify({
+      version: 1,
+      machines: [{...m, id: 'm5', sortOrder: 10}],
+      nextId: 1,
+      nextSortOrder: 0,
+    });
+    const restored = MachineRegistry.fromJSON(corrupt)!;
+    const added = restored.addFromUrl('https://zcode.z.ai/remote/v4?sid=sid-next&hash=a');
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(added.record.id).toBe('m6');
+    expect(added.record.sortOrder).toBe(11);
+  });
 });

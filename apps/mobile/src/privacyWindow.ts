@@ -3,6 +3,7 @@ import {NativeModules} from 'react-native';
 interface ZShellPrivacyWindowModule {
   getRecentsMaskEnabled(): Promise<boolean>;
   setRecentsMaskEnabled(enabled: boolean): void;
+  setSensitiveContentVisible?(sensitive: boolean): void;
 }
 
 /**

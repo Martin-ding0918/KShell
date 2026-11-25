@@ -9,6 +9,7 @@ import {
   disabledConfig,
   isNewer,
   LockConfig,
+  MachineLoginState,
   MachineRecord,
   MachineRegistry,
 } from '@zshell/core-shell';
@@ -30,6 +31,7 @@ import {cleanupInstalledApks, clearWebSession} from './src/downloads';
 import {fetchLatestRelease} from './src/updater';
 import {APP_VERSION} from './src/version';
 import {loadThemeMode, saveThemeMode, setConsoleBarColor} from './src/appearance';
+import {privacyWindow} from './src/privacyWindow';
 import {
   makeStyles,
   ThemeMode,
@@ -85,9 +87,11 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
   const [consented, setConsented] = useState(true);
   const [lock, setLock] = useState(disabledConfig());
   const [unlocked, setUnlocked] = useState(true);
+  const [settingsSensitive, setSettingsSensitive] = useState(false);
   const [stack, setStack] = useState<Screen[]>([{name: 'list'}]);
   const [machines, setMachines] = useState<MachineRecord[]>([]);
   const registryRef = useRef<MachineRegistry | null>(null);
+  const launchTasksRanRef = useRef(false);
   // Set by the console screen: prefers the web page's own history on back.
   const webBackRef = useRef<(() => boolean) | null>(null);
   const registerConsoleBack = useCallback((fn: (() => boolean) | null) => {
@@ -124,11 +128,14 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
   }, [consoleSessions, machines]);
 
   useEffect(() => {
-    registryRef.current = loadRegistry();
     const cfg = loadLockConfig();
     setLock(cfg);
-    setUnlocked(!cfg.enabled);
-    setMachines(registryRef.current.sorted());
+    const initiallyUnlocked = !cfg.enabled;
+    setUnlocked(initiallyUnlocked);
+    if (initiallyUnlocked) {
+      registryRef.current = loadRegistry();
+      setMachines(registryRef.current.sorted());
+    }
     const consent = loadLegalConsent();
     setConsented(consent != null && consent.version >= LEGAL_DOC_VERSION);
     setBooting(false);
@@ -137,6 +144,20 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
       clearWebSession().catch(() => {});
     }
   }, []);
+
+  // Load decrypted machine credentials only after the app lock is satisfied.
+  useEffect(() => {
+    if (!booting && unlocked && registryRef.current == null) {
+      registryRef.current = loadRegistry();
+      setMachines(registryRef.current.sorted());
+    }
+  }, [booting, unlocked]);
+
+  // Enforce FLAG_SECURE while LockScreen or backup/lock-secret flows are active
+  // (even on API 36+ where recents masking normally allows screenshots).
+  useEffect(() => {
+    privacyWindow?.setSensitiveContentVisible?.(!unlocked || settingsSensitive);
+  }, [unlocked, settingsSensitive]);
 
   // Relock whenever the app leaves the foreground while the lock is enabled
   // ('inactive' covers the recents screen / system dialogs on Android).
@@ -149,12 +170,13 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
     return () => sub.remove();
   }, [lock.enabled]);
 
-  // Silent update check on launch (toggle in Settings → 更新). Best-effort:
+  // Silent update check once per launch (toggle in Settings → 更新). Best-effort:
   // a local notification when a newer release exists; failures are ignored.
   useEffect(() => {
-    if (!consented || !unlocked || booting) {
+    if (!consented || !unlocked || booting || launchTasksRanRef.current) {
       return;
     }
+    launchTasksRanRef.current = true;
     cleanupInstalledApks();
     const prefs = loadPrefs();
     const notifier = notifications;
@@ -208,24 +230,38 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
   // 退出 Kimi 账号（网页登录数据是账号级、所有 Kimi 机器共享）：
   // 清空 WebView 登录数据并把每台 Kimi 机器的观测状态置为未登录。
   // 必须声明在下面的早退 return 之前（hook 不得条件执行）。
-  const signOutWebLogin = useCallback(() => {
+  const signOutWebLogin = useCallback(async () => {
     // 登录数据即将清空，在线控制台全部失效——卸载会话避免僵尸页面
     clearConsoleSessions();
-    clearWebSession()
-      .then(() => {
-        const registry = registryRef.current;
-        if (registry == null) {
-          return;
-        }
-        for (const m of registry.sorted()) {
-          if (m.credentials.kind === 'kimi') {
-            registry.setLoginState(m.id, 'logged-out');
-          }
-        }
-        persist();
-      })
-      .catch(() => {});
+    await clearWebSession();
+    const registry = registryRef.current;
+    if (registry == null) {
+      return;
+    }
+    for (const m of registry.sorted()) {
+      if (m.credentials.kind === 'kimi') {
+        registry.setLoginState(m.id, 'logged-out');
+      }
+    }
+    persist();
   }, [persist, clearConsoleSessions]);
+
+  const pop = useCallback(
+    () => setStack(st => (st.length > 1 ? st.slice(0, -1) : st)),
+    [],
+  );
+  const openDownloads = useCallback(
+    () => setStack(st => [...st, {name: 'downloads'}]),
+    [],
+  );
+  const handleConsoleLoginState = useCallback(
+    (id: string, state: MachineLoginState) => {
+      if (registryRef.current?.setLoginState(id, state)) {
+        persist();
+      }
+    },
+    [persist],
+  );
 
   const addFromUrl = useCallback(
     (url: string, customName?: string) => {
@@ -269,7 +305,6 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
   const overlayScreen = fromConsole || fromSettings ? top : null;
   const base = overlayScreen != null ? below! : top;
   const push = (s: Screen) => setStack(st => [...st, s]);
-  const pop = () => setStack(st => (st.length > 1 ? st.slice(0, -1) : st));
   const connectTo = (machineId: string) => {
     registryRef.current?.touch(machineId);
     persist();
@@ -314,7 +349,9 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
         persist();
         removeConsoleSession(id);
       }}
-      onSignOutWebLogin={signOutWebLogin}
+      onSignOutWebLogin={() => {
+        signOutWebLogin().catch(() => {});
+      }}
     />
   );
 
@@ -324,9 +361,22 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
       case 'permissions':
         return <PermissionsScreen onBack={pop} />;
       case 'downloads':
-        return <DownloadsScreen onBack={pop} visible={!booting && consented && unlocked} />;
+        return (
+          <DownloadsScreen
+            onBack={pop}
+            visible={!booting && consented && unlocked}
+            backLabel={fromConsole ? '返回控制台' : '返回设置'}
+          />
+        );
       case 'datamanage':
-        return <DataManageScreen machines={machines} lock={lock} onBack={pop} />;
+        return (
+          <DataManageScreen
+            machines={machines}
+            lock={lock}
+            onBack={pop}
+            onSignOutWebLogin={signOutWebLogin}
+          />
+        );
       case 'diagnostics':
         return <DiagnosticsScreen onBack={pop} />;
       default:
@@ -378,6 +428,7 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
       screen = (
         <SettingsScreen
           visible={!fromSettings && consented && unlocked}
+          unlocked={unlocked}
           lock={lock}
           onSaveLock={(cfg: LockConfig) => {
             saveLockConfig(cfg);
@@ -390,6 +441,8 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
             persist();
             return result;
           }}
+          onSignOutWebLogin={signOutWebLogin}
+          onSensitiveChange={setSettingsSensitive}
           onBack={pop}
           onOpenPermissions={() => push({name: 'permissions'})}
           onOpenDownloads={() => push({name: 'downloads'})}
@@ -455,12 +508,8 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
                 registerBackHandler={
                   consoleOnTop === id ? registerConsoleBack : noopRegister
                 }
-                onOpenDownloads={() => push({name: 'downloads'})}
-                onLoginState={state => {
-                  if (registryRef.current?.setLoginState(id, state)) {
-                    persist();
-                  }
-                }}
+                onOpenDownloads={openDownloads}
+                onLoginState={handleConsoleLoginState}
               />
             </View>
           );

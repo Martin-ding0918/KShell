@@ -1,5 +1,5 @@
 import {PairingCredentials} from './types';
-import {hostLabel, parsePairingUrl, ParseFailureReason} from './pairing-url';
+import {hostLabel, isValidKimiSid, parsePairingUrl, ParseFailureReason} from './pairing-url';
 
 /**
  * A saved remote machine (paired desktop endpoint). The whole registry is
@@ -46,8 +46,65 @@ export interface MachineRegistryOptions {
   acceptsCredentials?: (credentials: PairingCredentials) => boolean;
 }
 
-function isSupportedKind(creds: PairingCredentials): boolean {
+function isSupportedKind(creds: Partial<PairingCredentials>): boolean {
   return creds.kind === undefined || creds.kind === 'zcode' || creds.kind === 'kimi';
+}
+
+function sanitizeCredentials(raw: unknown): PairingCredentials | null {
+  if (raw == null || typeof raw !== 'object') {
+    return null;
+  }
+  const c = raw as Partial<PairingCredentials>;
+  if (
+    typeof c.sid !== 'string' ||
+    c.sid.trim().length === 0 ||
+    typeof c.hash !== 'string' ||
+    typeof c.origin !== 'string' ||
+    !isSupportedKind(c)
+  ) {
+    return null;
+  }
+  let normalizedOrigin: string;
+  try {
+    const parsed = new URL(c.origin);
+    if (parsed.protocol !== 'https:') {
+      return null;
+    }
+    normalizedOrigin = parsed.origin;
+  } catch {
+    return null;
+  }
+  const sid = c.sid.trim();
+  if (c.kind === 'kimi' && !isValidKimiSid(sid)) {
+    return null;
+  }
+  const sanitized: PairingCredentials = {
+    sid,
+    hash: c.hash,
+    origin: normalizedOrigin,
+    mid: typeof c.mid === 'string' ? c.mid : null,
+    deviceName: typeof c.deviceName === 'string' ? c.deviceName : null,
+    appVersion: typeof c.appVersion === 'string' ? c.appVersion : null,
+    issuedAt:
+      typeof c.issuedAt === 'number' && Number.isFinite(c.issuedAt)
+        ? c.issuedAt
+        : null,
+  };
+  if (c.kind !== undefined) {
+    sanitized.kind = c.kind;
+  }
+  if (c.source !== undefined) {
+    sanitized.source = typeof c.source === 'string' ? c.source : null;
+  }
+  if (c.extraQuery !== undefined) {
+    sanitized.extraQuery = typeof c.extraQuery === 'string' ? c.extraQuery : null;
+  }
+  return sanitized;
+}
+
+function parseMachineIdNumber(id: string): number {
+  const m = /^m([1-9][0-9]*)$/.exec(id);
+  return m != null ? Number(m[1]) : 0;
 }
 
 function defaultName(creds: PairingCredentials): string {  if (creds.kind === 'kimi') {
@@ -72,13 +129,78 @@ export class MachineRegistry {
 
   constructor(data?: MachineRegistryData | null, opts: MachineRegistryOptions = {}) {
     this.acceptsCredentials = opts.acceptsCredentials ?? (() => true);
-    this.data = data == null
-      ? {version: 1, machines: [], nextSortOrder: 1, nextId: 1}
-      : {...data, machines: data.machines
-          .filter(m => m?.credentials && isSupportedKind(m.credentials) && this.acceptsCredentials(m.credentials))
-          .map(({id, name, credentials, favorite, sortOrder, createdAt, lastUsedAt, muted, loginState, loginAt}) =>
-            ({id, name, credentials, favorite, sortOrder, createdAt, lastUsedAt, muted, loginState, loginAt}))};
     this.now = opts.now ?? Date.now;
+    if (data == null) {
+      this.data = {version: 1, machines: [], nextSortOrder: 1, nextId: 1};
+      return;
+    }
+    const machines: MachineRecord[] = [];
+    let maxId = 0;
+    let maxSort = 0;
+    for (const raw of data.machines) {
+      if (raw == null || typeof raw !== 'object') {
+        continue;
+      }
+      const credentials = sanitizeCredentials(raw.credentials);
+      if (
+        credentials == null ||
+        !this.acceptsCredentials(credentials) ||
+        typeof raw.id !== 'string' ||
+        raw.id.length === 0 ||
+        typeof raw.name !== 'string'
+      ) {
+        continue;
+      }
+      const sortOrder =
+        typeof raw.sortOrder === 'number' && Number.isFinite(raw.sortOrder)
+          ? raw.sortOrder
+          : ++maxSort;
+      const loginState: MachineLoginState | undefined =
+        raw.loginState === 'logged-in' || raw.loginState === 'logged-out'
+          ? raw.loginState
+          : undefined;
+      machines.push({
+        id: raw.id,
+        name: raw.name,
+        credentials,
+        favorite: raw.favorite === true,
+        sortOrder,
+        createdAt:
+          typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt)
+            ? raw.createdAt
+            : this.now(),
+        lastUsedAt:
+          typeof raw.lastUsedAt === 'number' && Number.isFinite(raw.lastUsedAt)
+            ? raw.lastUsedAt
+            : null,
+        muted: raw.muted === true ? true : raw.muted === false ? false : undefined,
+        loginState,
+        loginAt:
+          typeof raw.loginAt === 'number' && Number.isFinite(raw.loginAt)
+            ? raw.loginAt
+            : raw.loginAt === null
+              ? null
+              : undefined,
+      });
+      maxId = Math.max(maxId, parseMachineIdNumber(raw.id));
+      maxSort = Math.max(maxSort, sortOrder);
+    }
+    const rawNextId =
+      typeof data.nextId === 'number' && Number.isSafeInteger(data.nextId) && data.nextId >= 1
+        ? data.nextId
+        : 1;
+    const rawNextSort =
+      typeof data.nextSortOrder === 'number' &&
+      Number.isSafeInteger(data.nextSortOrder) &&
+      data.nextSortOrder >= 1
+        ? data.nextSortOrder
+        : 1;
+    this.data = {
+      version: 1,
+      machines,
+      nextId: Math.max(rawNextId, maxId + 1),
+      nextSortOrder: Math.max(rawNextSort, maxSort + 1),
+    };
   }
 
   toJSON(): MachineRegistryData {
@@ -236,29 +358,27 @@ export class MachineRegistry {
         continue;
       }
       const rec = r as Partial<MachineRecord>;
-      const creds = rec.credentials;
+      const sanitized = sanitizeCredentials(rec.credentials);
       if (
         typeof rec.name !== 'string' ||
-        creds == null ||
-        typeof creds.sid !== 'string' ||
-        typeof creds.hash !== 'string' ||
-        typeof creds.origin !== 'string' ||
-        !isSupportedKind(creds) ||
-        !this.acceptsCredentials(creds)
+        rec.name.trim().length === 0 ||
+        sanitized == null ||
+        !this.acceptsCredentials(sanitized)
       ) {
         continue;
       }
-      const sanitized: PairingCredentials = {
-        ...creds,
-        source: typeof creds.source === 'string' ? creds.source : null,
-        extraQuery: typeof creds.extraQuery === 'string' ? creds.extraQuery : null,
-      };
+      if (sanitized.source === undefined) {
+        sanitized.source = null;
+      }
+      if (sanitized.extraQuery === undefined) {
+        sanitized.extraQuery = null;
+      }
       const loginState: MachineLoginState | undefined =
         rec.loginState === 'logged-in' || rec.loginState === 'logged-out'
           ? rec.loginState
           : undefined;
       const existing = this.data.machines.find(
-        m => m.credentials.sid === creds.sid && m.credentials.origin === creds.origin,
+        m => m.credentials.sid === sanitized.sid && m.credentials.origin === sanitized.origin,
       );
       if (existing != null) {
         existing.credentials = sanitized;

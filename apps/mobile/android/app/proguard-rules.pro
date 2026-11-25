@@ -11,3 +11,9 @@
 # them unminified costs nothing meaningful and removes a whole risk class.
 # (RN/react-android and other AARs ship their own consumer rules.)
 -keep class com.zshell.** { *; }
+
+# tink-android (pulled in by react-native-mmkv-storage) references this
+# compile-only annotation on method signatures; the annotations jar used to
+# arrive transitively via the MLKit face-detection dependency that the
+# camera patch strips. Safe to ignore at runtime.
+-dontwarn com.google.errorprone.annotations.Immutable

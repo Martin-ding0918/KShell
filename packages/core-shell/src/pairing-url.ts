@@ -32,7 +32,12 @@ export type ParseResult =
 const KIMI_RC_HOSTS = new Set(['code-rc.kimi.com', 'code-rc.kimi.ai']);
 
 /** Device id charset observed in Kimi Code links (UUID-style). */
-const KIMI_DEVICE_PATH_RE = /^\/devices\/([A-Za-z0-9][A-Za-z0-9_-]*)\/?$/;
+const KIMI_DEVICE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const KIMI_DEVICE_PATH_RE = /^\/devices\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/?$/;
+
+export function isValidKimiSid(sid: string): boolean {
+  return KIMI_DEVICE_ID_RE.test(sid);
+}
 
 function fail(reason: ParseFailureReason): ParseResult {
   return {ok: false, reason};
@@ -144,7 +149,7 @@ export function sourceShortLabel(c: PairingCredentials): string {
  */
 export function consolePathFor(appVersion: string | null): 'v3' | 'v4' {
   const fallback: 'v3' | 'v4' = 'v4';
-  if (appVersion == null) {
+  if (typeof appVersion !== 'string') {
     return fallback;
   }
   const m = /^(\d+)\.(\d+)\.(\d+)/.exec(appVersion.trim());
@@ -178,6 +183,9 @@ export interface ConsoleUrlOptions {
  */
 export function buildConsoleUrl(c: PairingCredentials, opts: ConsoleUrlOptions = {}): string {
   if (c.kind === 'kimi') {
+    if (!isValidKimiSid(c.sid)) {
+      throw new Error('invalid kimi device id');
+    }
     const u = new URL(`/devices/${encodeURIComponent(c.sid)}/`, c.origin);
     if (c.extraQuery != null && c.extraQuery.length > 0) {
       u.search = c.extraQuery;

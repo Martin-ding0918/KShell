@@ -11,8 +11,25 @@ export const INSTALL_TOPBAR_ACTIVITY = String.raw`(function (scan, closeMenu, at
     closeMenu();
     scan();
   };
-  var observer = new MutationObserver(function () {
+  var isInsideMain = function (node) {
+    var cur = node && node.nodeType === 1 ? node : (node ? node.parentElement : null);
+    while (cur) {
+      if (cur.tagName === 'MAIN') return true;
+      cur = cur.parentElement;
+    }
+    return false;
+  };
+  var observer = new MutationObserver(function (records) {
     if (!active || frame !== null) return;
+    // Ignore streaming chat mutations inside <main>; topbar anchors live outside <main>.
+    var relevant = false;
+    for (var i = 0; i < records.length; i++) {
+      if (!isInsideMain(records[i].target)) {
+        relevant = true;
+        break;
+      }
+    }
+    if (!relevant) return;
     frame = requestAnimationFrame(function () {
       frame = null;
       if (active) scan();

@@ -10,9 +10,9 @@
 |---|---|---|
 | 首启同意门控 | 未同意《用户协议》《隐私政策》不进入应用，不同意则退出；同意记录含版本号，法律文本实质性变更后重新征求 | `src/screens/ConsentGate.tsx` + `STORAGE_KEYS.legal` |
 | 法律文本入口 | 设置 →「法律与关于」弹层查看：用户协议与免责声明 / 隐私政策 / 开源许可 | `src/screens/SettingsScreen.tsx` + `src/legal.ts` |
-| 权限最小化与用途声明 | 相机仅扫码、生物识别仅本机验证、照片仅主动选图识别、网络仅连自有桌面端——逐项写入隐私政策 | `PRIVACY.md` 第三节 |
-| 数据本地化 | 凭据 AES 加密（密钥在 Android Keystore），锁验证器 PBKDF2 哈希存储，零网络上报 | `src/storage.ts` + `core-shell/crypto.ts` |
-| 第三方清单 | 运行时依赖及其许可证逐项列于应用内「开源许可」与仓库文档 | `src/legal.ts` |
+| 权限最小化与用途声明 | 相机仅扫码、生物识别仅本机验证、照片仅主动选图识别、网络仅连官方控制台/登录页与 GitHub Releases 更新源——逐项写入隐私政策 | `PRIVACY.md` 第三节 |
+| 数据本地化 | 凭据 AES 加密（密钥在 Android Keystore），锁验证器 PBKDF2 哈希存储，禁用系统云备份与 Android 12+ 换机迁移，零网络上报 | `src/storage.ts` + `AndroidManifest.xml` + `data_extraction_rules.xml` |
+| 第三方清单 | 运行时依赖及其许可证逐项列于应用内「开源许可」与仓库文档；`react-native-camera-kit` 已通过补丁移除闭源 GMS / MLKit 依赖 | `src/legal.ts` + `patches/rn-camera-kit-zxing.patch` |
 | 非官方声明 | 首启同意文案 + 应用内关于 + 仓库 DISCLAIMER 三处一致 | 三处同步 |
 
 ## 国内上架材料清单（未来启动商店分发时）
@@ -30,9 +30,9 @@
 | 收集个人信息清单 | 无收集——按"不收集"填报，应用内行为与声明一致 |
 | 帐号注销/数据删除 | 无账号；卸载即全量删除（已写入隐私政策） |
 | 特殊行业资质 | 无（工具类） |
-| 商标风险 | 应用名 ZShell 已避开 ZCode 商标；描述性使用已声明非官方 |
+| 商标风险 | 应用名 KShell 已避开 Kimi / ZCode 商标；描述性使用已声明非官方 |
 
-**注意**：第三方客户端接入官方服务的长期风险与对冲策略见团队内部风险档案；
+**注意**：第三方客户端接入官方服务的长期风险需结合官方服务条款持续评估；
 若官方服务条款限制第三方客户端，对外分发前需重新评估（DISCLAIMER 第七条）。
 
 ## 已知边界（如实披露项）

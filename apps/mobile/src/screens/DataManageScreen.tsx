@@ -8,7 +8,7 @@ import {
   STORAGE_KEYS,
 } from '@zshell/core-shell';
 import {DonutChart, DonutSegment} from '../components/DonutChart';
-import {cleanupInstalledApks, clearWebSession, queryDownloads, removeDownload} from '../downloads';
+import {cleanupInstalledApks, queryDownloads, removeDownload} from '../downloads';
 import {clearDiag, diagSize} from '../diagnostics';
 import {secureStore} from '../storage';
 import {makeStyles, radius, useTheme} from '../theme';
@@ -17,6 +17,7 @@ interface DataManageScreenProps {
   machines: MachineRecord[];
   lock: LockConfig;
   onBack: () => void;
+  onSignOutWebLogin: () => Promise<void>;
 }
 
 interface Category {
@@ -35,7 +36,7 @@ interface Category {
  * consent, preferences) is listed as protected with no clear button, so a
  * stray tap can never lock the user out or orphan their machines.
  */
-export function DataManageScreen({machines, lock, onBack}: DataManageScreenProps) {
+export function DataManageScreen({machines, lock, onBack, onSignOutWebLogin}: DataManageScreenProps) {
   const {colors, font} = useTheme();
   const styles = useStyles();
   const [categories, setCategories] = useState<Category[] | null>(null);
@@ -138,7 +139,7 @@ export function DataManageScreen({machines, lock, onBack}: DataManageScreenProps
   const clearWeb = async () => {
     setError(null);
     try {
-      await clearWebSession();
+      await onSignOutWebLogin();
       setNote('已清除全部网页登录数据');
       setArmClearWeb(false);
     } catch {

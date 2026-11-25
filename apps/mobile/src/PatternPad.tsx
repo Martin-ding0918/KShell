@@ -29,6 +29,7 @@ export function PatternPad({size = 300, onComplete, hint}: PatternPadProps) {
   const [selected, setSelected] = useState<number[]>([]);
   const selectedRef = useRef<number[]>([]);
   const originRef = useRef({x: 0, y: 0});
+  const padRef = useRef<View>(null);
   // PanResponder is created once at mount; keep the latest callback in a ref
   // so step changes (e.g. "draw again to confirm") aren't lost to a stale
   // closure captured by the frozen responder.
@@ -56,14 +57,28 @@ export function PatternPad({size = 300, onComplete, hint}: PatternPadProps) {
     }
   };
 
+  const resetSelection = () => {
+    selectedRef.current = [];
+    setSelected([]);
+  };
+
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: e => {
-        selectedRef.current = [];
-        setSelected([]);
-        handlePoint(e.nativeEvent.pageX, e.nativeEvent.pageY);
+        const {pageX, pageY} = e.nativeEvent;
+        resetSelection();
+        const node = padRef.current;
+        if (node != null && typeof node.measureInWindow === 'function') {
+          node.measureInWindow((x, y) => {
+            originRef.current = {x, y};
+            handlePoint(pageX, pageY);
+          });
+        } else {
+          handlePoint(pageX, pageY);
+        }
       },
       onPanResponderMove: e => {
         handlePoint(e.nativeEvent.pageX, e.nativeEvent.pageY);
@@ -73,14 +88,17 @@ export function PatternPad({size = 300, onComplete, hint}: PatternPadProps) {
         if (dots.length >= 4) {
           onCompleteRef.current(dots);
         }
-        selectedRef.current = [];
-        setSelected([]);
+        resetSelection();
+      },
+      onPanResponderTerminate: () => {
+        resetSelection();
       },
     }),
   ).current;
 
   return (
     <View
+      ref={padRef}
       style={{width: size, height: size}}
       onLayout={(e: LayoutChangeEvent) => {
         e.currentTarget.measure((x, y, w, h, pageX, pageY) => {

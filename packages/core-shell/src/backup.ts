@@ -1,8 +1,8 @@
 import {
-  base64ToBytes,
   bytesToBase64,
   hmacSha256,
   pbkdf2Sha256,
+  strictBase64ToBytes,
   utf8Encode,
 } from './crypto';
 
@@ -77,10 +77,19 @@ function readBackup(blob: string) {
   if (v2 && (iterations < BACKUP_ITERATIONS || iterations > MAX_ITERATIONS)) return null;
   const [saltB64, ctB64, tagB64] = parts.slice(-3);
   try {
-    const salt = base64ToBytes(saltB64);
-    const ct = base64ToBytes(ctB64);
-    const tag = base64ToBytes(tagB64);
-    if (salt.length !== SALT_LEN || tag.length !== 32 || ct.length === 0) return null;
+    const salt = strictBase64ToBytes(saltB64);
+    const ct = strictBase64ToBytes(ctB64);
+    const tag = strictBase64ToBytes(tagB64);
+    if (
+      salt == null ||
+      ct == null ||
+      tag == null ||
+      salt.length !== SALT_LEN ||
+      tag.length !== 32 ||
+      ct.length === 0
+    ) {
+      return null;
+    }
     return {saltB64, salt, iterations, ct, tag, header: parts.slice(0, -2).join('.')};
   } catch {
     return null;

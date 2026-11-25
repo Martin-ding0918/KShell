@@ -9,6 +9,7 @@ import {
   hmacSha256,
   pbkdf2Sha256,
   sha256,
+  strictBase64ToBytes,
   utf8Encode,
 } from '../src/crypto';
 
@@ -97,6 +98,17 @@ describe('encodings', () => {
       expect(b64).toBe(Buffer.from(bytes).toString('base64'));
       expect(Array.from(base64ToBytes(b64))).toEqual(Array.from(bytes));
     }
+  });
+
+  it('strictBase64ToBytes accepts canonical Base64 and rejects non-canonical inputs', () => {
+    expect(Array.from(strictBase64ToBytes('AQIDBAUGBwgJCgsMDQ4PEA==')!)).toEqual(
+      Array.from(new Uint8Array(16).map((_, i) => i + 1)),
+    );
+    expect(strictBase64ToBytes('AQIDBAUGBwgJCgsMDQ4PEA===')).toBeNull();
+    expect(strictBase64ToBytes('AQID!')).toBeNull();
+    expect(strictBase64ToBytes('YQ')).toBeNull();
+    // Non-zero unused trailing pad bits ('YR==' decodes to same byte as 'YQ==')
+    expect(strictBase64ToBytes('YR==')).toBeNull();
   });
 
   it('hex round-trips', () => {

@@ -68,14 +68,21 @@ export function DonutChart({
   }
 
   /**
-   * A 180° band starting at `startDeg`: the outer square rotates about its
-   * center by (startDeg + 90) so that its (unrotated) top half — which spans
-   * [-90°, +90°] — becomes [startDeg, startDeg + 180]. overflow:hidden on the
-   * half does the clipping; the full-size ring child peeks through it.
+   * Exact wedge [startDeg, startDeg + sweepDeg] (0 < sweepDeg <= 180) built as
+   * the intersection of two half-planes — never wraps past 360° or overdraws
+   * earlier sectors:
+   *  - Outer top-half rotated by (startDeg + 90) clips to [startDeg, startDeg + 180]
+   *  - Inner top-half rotated by (sweepDeg - 180) relative to outer clips to
+   *    [startDeg + sweepDeg - 180, startDeg + sweepDeg]
+   *  - Their intersection is exactly [startDeg, startDeg + sweepDeg].
    */
-  const band = (startDeg: number, ringColor: string) => (
+  const wedge = (startDeg: number, sweepDeg: number, ringColor: string) => (
     <View style={StyleSheet.absoluteFill}>
-      <View style={{...StyleSheet.absoluteFillObject, transform: [{rotate: `${startDeg + 90}deg`}]}}>
+      <View
+        style={{
+          ...StyleSheet.absoluteFillObject,
+          transform: [{rotate: `${startDeg + 90}deg`}],
+        }}>
         <View style={halfStyle(size)}>
           <View
             style={{
@@ -84,11 +91,23 @@ export function DonutChart({
               left: 0,
               width: size,
               height: size,
-              borderRadius: size / 2,
-              borderWidth: thickness,
-              borderColor: ringColor,
-            }}
-          />
+              transform: [{rotate: `${sweepDeg - 180}deg`}],
+            }}>
+            <View style={halfStyle(size)}>
+              <View
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: size,
+                  height: size,
+                  borderRadius: size / 2,
+                  borderWidth: thickness,
+                  borderColor: ringColor,
+                }}
+              />
+            </View>
+          </View>
         </View>
       </View>
     </View>
@@ -113,10 +132,7 @@ export function DonutChart({
       />
       {sectors.map((sector, i) => (
         <React.Fragment key={`sector-${i}`}>
-          {band(sector.start, sector.color)}
-          {sector.start + sector.sweep < 359.99
-            ? band(sector.start + sector.sweep, surfaceColor)
-            : null}
+          {wedge(sector.start, sector.sweep, sector.color)}
         </React.Fragment>
       ))}
       <View

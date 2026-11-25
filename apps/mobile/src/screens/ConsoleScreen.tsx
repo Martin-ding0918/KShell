@@ -16,7 +16,11 @@ import {
   WebViewNavigation,
   WebViewMessageEvent,
 } from 'react-native-webview';
-import type {WebViewErrorEvent, WebViewOpenWindowEvent} from 'react-native-webview/lib/WebViewTypes';
+import type {
+  ShouldStartLoadRequest,
+  WebViewErrorEvent,
+  WebViewOpenWindowEvent,
+} from 'react-native-webview/lib/WebViewTypes';
 import {
   buildConsoleUrl,
   ConsoleEvent,
@@ -108,6 +112,24 @@ function authHostOf(url: string): string {
   }
 }
 
+function httpsHostOf(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' ? parsed.hostname.toLowerCase() : '';
+  } catch {
+    return '';
+  }
+}
+
+const KIMI_CONSOLE_HOST_RE = /^code-rc\.kimi\.(?:com|ai)$/;
+const ZCODE_CONSOLE_HOST_RE = /^(?:zcode\.z\.ai|zcode\.chatglm\.site)$/;
+const KIMI_MAIN_NAV_HOST_RE = /^(?:(?:code-rc|auth|www)\.)?kimi\.(?:com|ai)$|^(?:[a-z0-9-]+\.)?moonshot\.cn$/;
+const ZCODE_MAIN_NAV_HOST_RE = /^(?:[a-z0-9-]+\.)?(?:z\.ai|chatglm\.site|chatglm\.cn|bigmodel\.cn|zhipuai\.cn)$/;
+const KIMI_AUTH_NAV_HOST_RE = /^(?:[a-z0-9-]+\.)?(?:kimi\.com|kimi\.ai|moonshot\.cn)$|^accounts\.google\.com$|^appleid\.apple\.com$|^open\.weixin\.qq\.com$/;
+
+const MAX_RENDERER_AUTO_RECOVERIES = 2;
+const RENDERER_CRASH_WINDOW_MS = 60_000;
+
 interface ConsoleScreenProps {
   machine: MachineRecord;
   foreground: boolean;
@@ -124,7 +146,7 @@ interface ConsoleScreenProps {
    * Observed web-login state for Kimi Code machines (page landing on /login
    * means signed out, staying on /devices/ means signed in).
    */
-  onLoginState?: (state: MachineLoginState) => void;
+  onLoginState?: (machineId: string, state: MachineLoginState) => void;
 }
 
 /**
@@ -142,6 +164,9 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     );
   }, []);
   const [rendererGone, setRendererGone] = useState(false);
+  const crashCountRef = useRef(0);
+  const lastCrashAtRef = useRef(0);
+  const crashRecoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canGoBackRef = useRef(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [status, setStatus] = useState<ConsoleStatus>('connecting');
@@ -232,15 +257,15 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     if (zcodePage === 'chat') pushZcodeStatus();
   }, [zcodePage, pushZcodeStatus]);
   // Notification ids must not collide across simultaneously-alive console
-  // sessions: offset by a stable hash of the machine id.
+  // sessions or reserved app ids (5=update, 6=stalled, 7=paused): offset >= 10.
   const notifyIdBase = useMemo(
-    () => (machine.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 400) * 10,
+    () => ((machine.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 399) + 1) * 10,
     [machine.id],
   );
 
   useEffect(() => {
     prefsRef.current = loadPrefs();
-  }, []);
+  }, [foreground]);
 
   const notify = useCallback(
     (
@@ -249,7 +274,8 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       title: string,
       body: string,
     ) => {
-      const prefs = prefsRef.current;
+      const prefs = loadPrefs();
+      prefsRef.current = prefs;
       if (!prefs.notificationsEnabled || machine.muted || notifications == null) {
         return;
       }
@@ -286,6 +312,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   // 层自动收起。不能丢给系统浏览器——登录态会落进浏览器的 Cookie 存储，
   // 壳里永远未登录。
   const [authWindowUrl, setAuthWindowUrl] = useState<string | null>(null);
+  const [authCurrentHost, setAuthCurrentHost] = useState('');
   // The bridge handler is created once per machine; menu items reach the
   // latest reload through a ref so the callback identity stays stable.
   const reloadRef = useRef<(mode?: 'current-page') => void>(() => {});
@@ -301,14 +328,18 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   const handleBridgeMessage = useCallback(
     (event: WebViewMessageEvent) => {
       const data = event.nativeEvent.data;
-      const host = authHostOf(event.nativeEvent.url);
-      const kimiPage = isKimi && /^code-rc\.kimi\.(com|ai)$/.test(host);
-      const zcodeConsole = isZcode && /^(zcode\.z\.ai|zcode\.chatglm\.site)$/.test(host);
-      if ((kimiPage || zcodeConsole) && data === 'zshell:topbar-activity-ready') {
+      const host = httpsHostOf(event.nativeEvent.url);
+      const kimiPage = isKimi && KIMI_CONSOLE_HOST_RE.test(host);
+      const zcodeConsole = isZcode && ZCODE_CONSOLE_HOST_RE.test(host);
+      // Only trusted HTTPS official console origins may talk to the native bridge.
+      if (!kimiPage && !zcodeConsole) {
+        return;
+      }
+      if (data === 'zshell:topbar-activity-ready') {
         syncTopbarActivity(foreground && AppState.currentState === 'active');
         return;
       }
-      if ((kimiPage || zcodeConsole) && data === 'zshell:first-paint') {
+      if (data === 'zshell:first-paint') {
         attempt.current.firstPaintAt ??= performance.now();
         logDiag('first-paint');
         setLoadFailed(false);
@@ -333,16 +364,19 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           return;
         }
         if (data === 'zshell:kimi-back') {
+          if (!foreground) return;
           setControlsVisible(false);
           onBack();
           return;
         }
         if (data === 'zshell:kimi-downloads') {
+          if (!foreground) return;
           setControlsVisible(false);
           onOpenDownloads();
           return;
         }
         if (data === 'zshell:kimi-reload') {
+          if (!foreground) return;
           reloadRef.current('current-page');
           return;
         }
@@ -361,22 +395,27 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           return;
         }
         if (data === 'zshell:zcode-webback') {
+          if (!foreground) return;
           handleWebBack();
           return;
         }
         if (data === 'zshell:zcode-back') {
+          if (!foreground) return;
           onBack();
           return;
         }
         if (data === 'zshell:zcode-downloads') {
+          if (!foreground) return;
           onOpenDownloads();
           return;
         }
         if (data === 'zshell:zcode-reload') {
+          if (!foreground) return;
           reloadRef.current('current-page');
           return;
         }
         if (data === 'zshell:zcode-reconnect') {
+          if (!foreground) return;
           reloadRef.current();
           return;
         }
@@ -391,28 +430,36 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         notify(notifyIdBase + 2, 'approval', `${brand} · 等待你的批准`, 'Agent 请求执行操作，点开应用处理');
         return;
       }
-      setStatus(prev => {
-        const next = deriveConsoleStatus(prev, bridgeEvent);
-        if (next !== prev) {
-          if (next === 'kicked') {
-            notify(notifyIdBase + 3, 'security', '会话已在其他设备连接', '如需夺回请点开应用重连');
-          } else if (next === 'disconnected' && prev === 'connected') {
-            notify(notifyIdBase + 4, 'info', '连接已断开', '正在自动重连，可点开应用查看');
-          }
+      const prev = statusRef.current;
+      const next = deriveConsoleStatus(prev, bridgeEvent);
+      if (next !== prev) {
+        statusRef.current = next;
+        setStatus(next);
+        if (next === 'kicked') {
+          notify(notifyIdBase + 3, 'security', '会话已在其他设备连接', '如需夺回请点开应用重连');
+        } else if (next === 'disconnected' && prev === 'connected') {
+          notify(notifyIdBase + 4, 'info', '连接已断开', '正在自动重连，可点开应用查看');
         }
-        return next;
-      });
+      }
     },
-    [notify, brand, isKimi, isZcode, foreground, pushKimiStatus, pushZcodeStatus, handleWebBack, onBack, onOpenDownloads, syncTopbarActivity],
+    [notify, notifyIdBase, brand, isKimi, isZcode, foreground, pushKimiStatus, pushZcodeStatus, handleWebBack, onBack, onOpenDownloads, syncTopbarActivity],
   );
 
-  const reload = useCallback((mode?: 'current-page') => {
+  const reload = useCallback((mode?: 'current-page', fromAutoCrash = false) => {
     logDiag('page-reload');
+    if (crashRecoverTimerRef.current != null) {
+      clearTimeout(crashRecoverTimerRef.current);
+      crashRecoverTimerRef.current = null;
+    }
+    if (!fromAutoCrash) {
+      crashCountRef.current = 0;
+    }
     setRendererGone(false);
     attempt.current = {startedAt: performance.now()};
     setFailureReport('');
     setKimiHeaderReady(false);
     setZcodePage('other');
+    statusRef.current = 'connecting';
     setStatus('connecting');
     setLoadFailed(false);
     setNeedsLogin(false);
@@ -420,6 +467,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     // A full page load cannot complete an OAuth popup started earlier; leaving
     // the overlay up would cover the reloaded console forever.
     setAuthWindowUrl(null);
+    setAuthCurrentHost('');
     if (mode === 'current-page' && webviewRef.current) {
       // Keep the live renderer and refresh the current console document.
       setCover('reloading');
@@ -455,14 +503,32 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       if (!active) return;
 
       if (fromAppState) logDiag('app-active', statusRef.current);
-      if (rendererGone || statusRef.current === 'disconnected' || loadFailedRef.current) {
+      if (rendererGone) {
+        if (crashCountRef.current <= MAX_RENDERER_AUTO_RECOVERIES) {
+          const delay = crashCountRef.current * 1500;
+          logDiag('auto-reload');
+          crashRecoverTimerRef.current = setTimeout(() => {
+            crashRecoverTimerRef.current = null;
+            reload(undefined, true);
+          }, delay);
+        } else {
+          setLoadFailed(true);
+          setCover('hidden');
+        }
+      } else if (statusRef.current === 'disconnected' || loadFailedRef.current) {
         logDiag('auto-reload');
         reload();
       }
     };
     const sub = AppState.addEventListener('change', state => update(state, true));
     update(AppState.currentState, false);
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      if (crashRecoverTimerRef.current != null) {
+        clearTimeout(crashRecoverTimerRef.current);
+        crashRecoverTimerRef.current = null;
+      }
+    };
   }, [foreground, reload, rendererGone, syncTopbarActivity]);
 
   // Kimi Code 登录态观测：页面最终落在 /login = 未登录，留在 /devices/ = 已登录。
@@ -474,23 +540,78 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     setNeedsLogin(login === 'logged-out');
     if (login === undefined) return;
     logDiag('login-observed', login);
-    onLoginState?.(login);
-    if (login === 'logged-in') setAuthWindowUrl(null);
-  }, [isKimi, onLoginState]);
+    onLoginState?.(machine.id, login);
+    if (login === 'logged-in') {
+      setAuthWindowUrl(null);
+      setAuthCurrentHost('');
+    }
+  }, [isKimi, machine.id, onLoginState]);
 
   const handleOpenWindow = useCallback((event: WebViewOpenWindowEvent) => {
     if (!foreground || AppState.currentState !== 'active') return;
     const target = event.nativeEvent.targetUrl;
-    if (typeof target !== 'string' || !/^https?:\/\//i.test(target)) return;
+    if (typeof target !== 'string' || !/^https:\/\//i.test(target)) return;
     const host = authHostOf(target);
     if (!host) return;
     logDiag('window-open', host);
     if (isKimi && /^https:\/\/auth\.kimi\.com(?::443)?(?:[/?#]|$)/i.test(target)) {
       setAuthWindowUrl(target);
+      setAuthCurrentHost(host);
     } else {
       openInBrowser(target).catch(() => Alert.alert('无法打开浏览器'));
     }
   }, [foreground, isKimi]);
+
+  const handleShouldStartMain = useCallback(
+    (req: ShouldStartLoadRequest): boolean => {
+      const target = req.url;
+      if (target === 'about:blank') return true;
+      const host = httpsHostOf(target);
+      if (!host) {
+        // Block non-HTTPS schemes (http:, file:, intent:, javascript:, data:).
+        return false;
+      }
+      const allowed = isKimi
+        ? KIMI_MAIN_NAV_HOST_RE.test(host)
+        : isZcode
+          ? ZCODE_MAIN_NAV_HOST_RE.test(host)
+          : false;
+      if (allowed) {
+        return true;
+      }
+      if (req.isTopFrame === false) {
+        // Block untrusted third-party subframes inside the console WebView.
+        return false;
+      }
+      if (foreground && AppState.currentState === 'active') {
+        openInBrowser(target).catch(() => Alert.alert('无法打开浏览器'));
+      }
+      return false;
+    },
+    [foreground, isKimi, isZcode],
+  );
+
+  const handleShouldStartAuth = useCallback(
+    (req: ShouldStartLoadRequest): boolean => {
+      const target = req.url;
+      if (target === 'about:blank') return true;
+      const host = httpsHostOf(target);
+      if (!host) {
+        return false;
+      }
+      if (KIMI_AUTH_NAV_HOST_RE.test(host)) {
+        return true;
+      }
+      if (req.isTopFrame === false) {
+        return false;
+      }
+      if (foreground && AppState.currentState === 'active') {
+        openInBrowser(target).catch(() => Alert.alert('无法打开浏览器'));
+      }
+      return false;
+    },
+    [foreground],
+  );
 
   useEffect(() => {
     registerBackHandler(handleWebBack);
@@ -553,7 +674,8 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         javaScriptEnabled
         domStorageEnabled
         cacheEnabled={false}
-        originWhitelist={['*']}
+        originWhitelist={['https://*']}
+        onShouldStartLoadWithRequest={handleShouldStartMain}
         style={styles.webview}
         containerStyle={styles.webview}
         // Kimi Code 登录（auth.kimi.com）经 window.open 发起，必须放行
@@ -587,7 +709,16 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           logDiag('load-error', Number.isSafeInteger(code) ? String(code) : undefined);
         }}
         // Dispose of the dead native view even when its console is hidden.
-        onRenderProcessGone={() => setRendererGone(true)}
+        onRenderProcessGone={() => {
+          const now = Date.now();
+          if (now - lastCrashAtRef.current > RENDERER_CRASH_WINDOW_MS) {
+            crashCountRef.current = 0;
+          }
+          crashCountRef.current += 1;
+          lastCrashAtRef.current = now;
+          recordFailure({kind: 'load-error', code: -1});
+          setRendererGone(true);
+        }}
         onMessage={handleBridgeMessage}
         renderError={() => <View />}
       />}
@@ -672,13 +803,16 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           <View style={styles.authBar}>
             <View style={styles.authSide} />
             <Text style={styles.authTitle} numberOfLines={1}>
-              {authHostOf(authWindowUrl)} · 授权登录
+              {authCurrentHost || authHostOf(authWindowUrl)} · 授权登录
             </Text>
             <TouchableOpacity
               style={styles.authClose}
               accessibilityRole="button"
               accessibilityLabel="关闭授权页"
-              onPress={() => setAuthWindowUrl(null)}>
+              onPress={() => {
+                setAuthWindowUrl(null);
+                setAuthCurrentHost('');
+              }}>
               <Text style={styles.authCloseText}>✕</Text>
             </TouchableOpacity>
           </View>
@@ -688,7 +822,12 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
             javaScriptEnabled
             domStorageEnabled
             cacheEnabled={false}
-            originWhitelist={['*']}
+            originWhitelist={['https://*']}
+            onShouldStartLoadWithRequest={handleShouldStartAuth}
+            onNavigationStateChange={(nav: WebViewNavigation) => {
+              const h = typeof nav.url === 'string' ? authHostOf(nav.url) : '';
+              if (h) setAuthCurrentHost(h);
+            }}
             style={styles.webview}
             setSupportMultipleWindows
             javaScriptCanOpenWindowsAutomatically

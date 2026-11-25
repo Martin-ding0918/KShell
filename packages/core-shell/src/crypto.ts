@@ -207,6 +207,23 @@ export function base64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
+const CANONICAL_B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/**
+ * Strict canonical Base64 decoder: rejects whitespace, non-Base64 characters,
+ * bad padding lengths, and non-zero trailing pad bits.
+ */
+export function strictBase64ToBytes(b64: string): Uint8Array | null {
+  if (b64.length % 4 !== 0 || !CANONICAL_B64_RE.test(b64)) {
+    return null;
+  }
+  const bytes = base64ToBytes(b64);
+  if (bytesToBase64(bytes) !== b64) {
+    return null;
+  }
+  return bytes;
+}
+
 export function utf8Encode(s: string): Uint8Array {
   const out: number[] = [];
   for (let i = 0; i < s.length; i++) {

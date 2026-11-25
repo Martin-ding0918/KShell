@@ -92,8 +92,8 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         resConfigs "zh-rCN", "zh-rTW", "en"
-        versionCode 45
-        versionName "0.0.1.28"
+        versionCode 46
+        versionName "0.0.2"
         manifestPlaceholders = [allowCleartextTraffic: "false"]
     }
 

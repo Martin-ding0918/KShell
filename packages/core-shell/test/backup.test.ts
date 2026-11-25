@@ -68,6 +68,16 @@ describe('backup encryption', () => {
     expect(parseBackupBlob('OTHER.@@@@@@@@@@@@@@@@@@@.YQ.YQ.YQ.YQ')).toBeNull();
   });
 
+  it('rejects non-canonical Base64 and header/ciphertext boundary shifts', () => {
+    const parts = blob.split('.');
+    // Appending '=' or non-Base64 chars to saltB64 must be rejected even though
+    // lenient base64ToBytes would ignore them and keep the salt unchanged.
+    expect(parseBackupBlob([parts[0], parts[1], parts[2] + '=', parts[3], parts[4]].join('.'))).toBeNull();
+    expect(parseBackupBlob([parts[0], parts[1], parts[2] + '!', parts[3], parts[4]].join('.'))).toBeNull();
+    expect(parseBackupBlob([parts[0], parts[1], parts[2], parts[3] + '\n', parts[4]].join('.'))).toBeNull();
+    expect(decryptBackupWithKeys([parts[0], parts[1], parts[2] + '=', parts[3], parts[4]].join('.'), keys)).toBeNull();
+  });
+
   it('round-trips Unicode and makes distinct ciphertext for distinct salts', () => {
     const json = JSON.stringify({name: '华为手机-🧪-Ωμέγα'});
     const salt2 = new Uint8Array(16).fill(9);

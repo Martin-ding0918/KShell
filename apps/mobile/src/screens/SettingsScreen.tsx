@@ -1,9 +1,8 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {
   Clipboard,
   Linking,
   Modal,
-  NativeModules,
   Platform,
   ScrollView,
   StyleSheet,
@@ -15,7 +14,6 @@ import {
 } from 'react-native';
 import {
   activeSecrets,
-  base64ToBytes,
   clearMethod,
   formatBytes,
   formatPercent,
@@ -24,11 +22,18 @@ import {
   LockConfig,
   MachineRecord,
   patternToString,
+  recordLockFailure,
   ReleaseInfo,
   setBiometric,
 } from '@zshell/core-shell';
 import {biometricAuth} from '../biometric';
-import {buildLockVerifier, encryptBackupAsync, decryptBackupAsync, verifySecretAsync} from '../securekdf';
+import {
+  buildLockVerifier,
+  decryptBackupAsync,
+  encryptBackupAsync,
+  secureRandomBytes,
+  verifySecretAsync,
+} from '../securekdf';
 import {LegalDocModal} from '../components/LegalDocModal';
 import {MarkdownText} from '../components/MarkdownText';
 import {SecretInput} from '../components/SecretInput';
@@ -44,32 +49,24 @@ import {
   resumeDownload,
   shareTextFile,
   startUpdateDownload,
-  clearWebSession,
 } from '../downloads';
+import {clearLockAttempts, loadLockAttempts, saveLockAttempts} from '../storage';
 import {fetchLatestRelease, PROJECT_PAGE} from '../updater';
 import {biometricLabel} from './LockScreen';
 import {makeStyles, radius, ThemeMode, useTheme} from '../theme';
 import {APP_VERSION} from '../version';
 
-/** Salt RNG backed by the native SecureRandom (JS Math.random is predictable). */
-async function rng(n: number): Promise<Uint8Array> {
-  const native = NativeModules.ZShellCrypto as
-    | {secureRandomBase64(count: number): Promise<string>}
-    | undefined;
-  if (native != null) {
-    return base64ToBytes(await native.secureRandomBase64(n));
-  }
-  throw new Error('安全随机数模块不可用');
-}
-
 interface SettingsScreenProps {
   visible: boolean;
+  unlocked: boolean;
   lock: LockConfig;
   onSaveLock: (config: LockConfig) => void;
   machines: MachineRecord[];
   onImportMachines: (
     records: unknown,
   ) => {added: number; updated: number};
+  onSignOutWebLogin: () => Promise<void>;
+  onSensitiveChange?: (sensitive: boolean) => void;
   onBack: () => void;
   onOpenPermissions: () => void;
   onOpenDownloads: () => void;
@@ -105,10 +102,13 @@ type UpdateState =
 /** Settings: multi-method lock management + update check + legal center. */
 export function SettingsScreen({
   visible,
+  unlocked,
   lock,
   onSaveLock,
   machines,
   onImportMachines,
+  onSignOutWebLogin,
+  onSensitiveChange,
   onBack,
   onOpenPermissions,
   onOpenDownloads,
@@ -157,10 +157,52 @@ export function SettingsScreen({
   /** Web login wipe: two-tap arm + result feedback. */
   const [webClearArm, setWebClearArm] = useState(false);
   const [webClearResult, setWebClearResult] = useState<string | null>(null);
+  const [attempts, setAttempts] = useState(loadLockAttempts);
+  const [now, setNow] = useState(Date.now);
+  const [verifying, setVerifying] = useState(false);
+  const verifyInFlight = useRef(false);
+  const verifyRemaining = Math.max(0, Math.ceil((attempts.retryAt - now) / 1000));
 
   useEffect(() => {
-    setPrefs(loadPrefs());
-  }, []);
+    if (visible) {
+      setPrefs(loadPrefs());
+      setAttempts(loadLockAttempts());
+      setNow(Date.now());
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (verifyRemaining <= 0) return;
+    const timer = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [verifyRemaining]);
+
+  // Wipe sensitive in-memory state and dismiss all modals as soon as the app locks.
+  useEffect(() => {
+    if (!unlocked) {
+      setBackupBlob(null);
+      setBackupMode(null);
+      setBackupPass('');
+      setBackupPass2('');
+      setRestoreBlob('');
+      setRestorePass('');
+      setPasswordValue('');
+      setStep({kind: 'idle'});
+      setOpenDoc(null);
+      setNotesRelease(null);
+      setError(null);
+    }
+  }, [unlocked]);
+
+  useEffect(() => {
+    onSensitiveChange?.(backupMode != null || backupBlob != null || step.kind !== 'idle');
+  }, [backupMode, backupBlob, step.kind, onSensitiveChange]);
+
+  useEffect(() => {
+    return () => {
+      onSensitiveChange?.(false);
+    };
+  }, [onSensitiveChange]);
 
   useEffect(() => {
     biometricAuth.isAvailable().then(r => {
@@ -182,6 +224,8 @@ export function SettingsScreen({
   const requestVerify = (title: string, action: () => void) => {
     setPasswordValue('');
     setError(null);
+    setAttempts(loadLockAttempts());
+    setNow(Date.now());
     setStep({kind: 'verify', title, action});
   };
 
@@ -190,19 +234,39 @@ export function SettingsScreen({
     secret: string,
     action: () => void,
   ) => {
-    verifySecretAsync(secret, kind, lock).then(ok => {
-      if (ok) {
-        action();
-        setStep({kind: 'idle'});
-        setError(null);
-      } else {
-        setError('验证失败');
-      }
-    }).catch(() => setError('验证暂不可用，请重试'));
+    if (verifyInFlight.current || attempts.retryAt > Date.now() || !secret) {
+      return;
+    }
+    verifyInFlight.current = true;
+    setVerifying(true);
+    verifySecretAsync(secret, kind, lock)
+      .then(ok => {
+        if (ok) {
+          clearLockAttempts();
+          setAttempts({failures: 0, retryAt: 0});
+          setStep({kind: 'idle'});
+          setError(null);
+          setPasswordValue('');
+          action();
+        } else {
+          const time = Date.now();
+          const next = recordLockFailure(attempts, time);
+          setAttempts(next);
+          setNow(time);
+          saveLockAttempts(next);
+          setPasswordValue('');
+          setError('验证失败');
+        }
+      })
+      .catch(() => setError('验证暂不可用，请重试'))
+      .finally(() => {
+        verifyInFlight.current = false;
+        setVerifying(false);
+      });
   };
 
   const finishPatternSet = (secret: string) => {
-    rng(16)
+    secureRandomBytes(16)
       .then(salt => buildLockVerifier(secret, salt))
       .then(verifier => {
         onSaveLock(installVerifier(lock, 'pattern', verifier));
@@ -213,7 +277,7 @@ export function SettingsScreen({
   };
 
   const finishPasswordSet = (secret: string) => {
-    rng(16)
+    secureRandomBytes(16)
       .then(salt => buildLockVerifier(secret, salt))
       .then(verifier => {
         onSaveLock(installVerifier(lock, 'password', verifier));
@@ -282,7 +346,7 @@ export function SettingsScreen({
       machines,
     });
     try {
-      const blob = await encryptBackupAsync(payload, backupPass, await rng(16));
+      const blob = await encryptBackupAsync(payload, backupPass, await secureRandomBytes(16));
       setBackupBlob(blob);
     } catch {
       setError('备份失败：无法生成加密数据，请重试');
@@ -471,16 +535,29 @@ export function SettingsScreen({
             disabled={!biometricAvailable && !lock.methods.biometric}
             onValueChange={async on => {
               setError(null);
+              const enableBiometric = async () => {
+                const ok = await biometricAuth.prompt('验证通过后开启生物识别');
+                if (ok) {
+                  onSaveLock(setBiometric(lock, true));
+                } else {
+                  setError('验证未通过，未开启生物识别');
+                }
+              };
               if (!on) {
-                onSaveLock(setBiometric(lock, false));
+                requestVerify(`关闭${biometricLabel(biometricType)}`, () =>
+                  onSaveLock(setBiometric(lock, false)),
+                );
                 return;
               }
-              const ok = await biometricAuth.prompt('验证通过后开启生物识别');
-              if (ok) {
-                onSaveLock(setBiometric(lock, true));
-              } else {
-                setError('验证未通过，未开启生物识别');
+              if (lock.enabled) {
+                requestVerify(`开启${biometricLabel(biometricType)}`, () => {
+                  enableBiometric().catch(() =>
+                    setError('验证暂不可用，请重试'),
+                  );
+                });
+                return;
               }
+              await enableBiometric();
             }}
             {...switchColors}
           />
@@ -498,13 +575,15 @@ export function SettingsScreen({
             style={styles.rowButton}
             onPress={() => {
               setError(null);
-              if (lock.methods.pattern != null) {
-                // Changing an existing method requires unlocking first,
-                // otherwise anyone holding the phone could swap the pattern.
-                requestVerify('更换图案', () => {
-                  setStep({kind: 'patternSet', confirmOf: null});
-                  setError(null);
-                });
+              if (lock.enabled) {
+                // Any mutation while app lock is active requires verification first.
+                requestVerify(
+                  lock.methods.pattern != null ? '更换图案' : '设置图案',
+                  () => {
+                    setStep({kind: 'patternSet', confirmOf: null});
+                    setError(null);
+                  },
+                );
               } else {
                 setStep({kind: 'patternSet', confirmOf: null});
               }
@@ -541,11 +620,14 @@ export function SettingsScreen({
             onPress={() => {
               setError(null);
               setPasswordValue('');
-              if (lock.methods.password != null) {
-                requestVerify('更换密码', () => {
-                  setStep({kind: 'passwordSet', first: null});
-                  setError(null);
-                });
+              if (lock.enabled) {
+                requestVerify(
+                  lock.methods.password != null ? '更换密码' : '设置密码',
+                  () => {
+                    setStep({kind: 'passwordSet', first: null});
+                    setError(null);
+                  },
+                );
               } else {
                 setStep({kind: 'passwordSet', first: null});
               }
@@ -624,8 +706,12 @@ export function SettingsScreen({
                 onPress={async () => {
                   const ok = await biometricAuth.prompt('验证以继续');
                   if (ok) {
-                    step.action();
+                    clearLockAttempts();
+                    setAttempts({failures: 0, retryAt: 0});
+                    const nextAction = step.action;
                     setStep({kind: 'idle'});
+                    setError(null);
+                    nextAction();
                   } else {
                     setError('验证未通过');
                   }
@@ -638,7 +724,11 @@ export function SettingsScreen({
             {lock.methods.pattern != null ? (
               <View style={{alignItems: 'center', marginVertical: 10}}>
                 <PatternPad
-                  hint={error ?? '绘制当前图案'}
+                  hint={
+                    verifyRemaining > 0
+                      ? `请等待 ${verifyRemaining} 秒`
+                      : error ?? '绘制当前图案'
+                  }
                   onComplete={dots =>
                     verifyBySecret('pattern', patternToString(dots), step.action)
                   }
@@ -649,6 +739,7 @@ export function SettingsScreen({
               <>
                 <SecretInput
                   placeholder="当前密码"
+                  editable={!verifying && verifyRemaining === 0}
                   value={password}
                   onChangeText={setPasswordValue}
                   onSubmitEditing={() =>
@@ -657,10 +748,14 @@ export function SettingsScreen({
                 />
                 <TouchableOpacity
                   style={styles.primaryButton}
+                  disabled={verifying || verifyRemaining > 0}
                   onPress={() => verifyBySecret('password', password, step.action)}>
                   <Text style={styles.primaryButtonText}>验证</Text>
                 </TouchableOpacity>
               </>
+            ) : null}
+            {verifyRemaining > 0 ? (
+              <Text style={styles.errorText}>请等待 {verifyRemaining} 秒后重试</Text>
             ) : null}
             {error != null ? <Text style={styles.errorText}>{error}</Text> : null}
           </View>
@@ -811,12 +906,12 @@ export function SettingsScreen({
           <Switch
             value={prefs.cacheWebLogin}
             onValueChange={on => {
-              const next = {...prefs, cacheWebLogin: on};
+              const next = {...loadPrefs(), cacheWebLogin: on};
               setPrefs(next);
               savePrefs(next);
               if (!on) {
-                // 关闭立即兑现语义：清一次登录数据
-                clearWebSession().catch(() => {});
+                // 关闭立即兑现语义：卸载保活会话并清一次登录数据
+                onSignOutWebLogin().catch(() => {});
               }
             }}
             {...switchColors}
@@ -832,7 +927,7 @@ export function SettingsScreen({
             }
             setWebClearArm(false);
             try {
-              await clearWebSession();
+              await onSignOutWebLogin();
               setWebClearResult('已清除全部网页登录数据');
             } catch {
               setWebClearResult('清除失败，可稍后重试');
@@ -877,7 +972,7 @@ export function SettingsScreen({
           <Switch
             value={prefs.autoCheckUpdates}
             onValueChange={on => {
-              const next = {...prefs, autoCheckUpdates: on};
+              const next = {...loadPrefs(), autoCheckUpdates: on};
               setPrefs(next);
               savePrefs(next);
             }}
@@ -1115,11 +1210,11 @@ export function SettingsScreen({
         </Text>
       </View>
 
-      <LegalDocModal doc={openDoc} onClose={() => setOpenDoc(null)} />
+      <LegalDocModal doc={visible ? openDoc : null} onClose={() => setOpenDoc(null)} />
 
       {/* Backup result viewer (encrypted blob: copy or save as a file). */}
       <Modal
-        visible={backupBlob != null}
+        visible={visible && backupBlob != null}
         animationType="slide"
         onRequestClose={() => setBackupBlob(null)}>
         <View style={styles.notesRoot}>
@@ -1166,7 +1261,7 @@ export function SettingsScreen({
 
       {/* Full update-notes viewer (markdown-rendered CHANGELOG section). */}
       <Modal
-        visible={notesRelease != null}
+        visible={visible && notesRelease != null}
         animationType="slide"
         onRequestClose={() => setNotesRelease(null)}>
         <View style={styles.notesRoot}>

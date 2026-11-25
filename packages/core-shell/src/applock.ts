@@ -37,7 +37,30 @@ export interface LockConfig {
   createdAt: number;
 }
 
-export const LOCK_ITERATIONS = 20000;
+export const LOCK_ITERATIONS = 100_000;
+const MAX_LOCK_ITERATIONS = 1_000_000;
+const HEX_RE = /^[0-9a-fA-F]+$/;
+
+function isValidVerifier(v: unknown): v is LockVerifier {
+  if (v == null || typeof v !== 'object') {
+    return false;
+  }
+  const cand = v as Partial<LockVerifier>;
+  return (
+    typeof cand.saltHex === 'string' &&
+    cand.saltHex.length >= LOCK_SALT_LEN * 2 &&
+    cand.saltHex.length % 2 === 0 &&
+    HEX_RE.test(cand.saltHex) &&
+    typeof cand.hashHex === 'string' &&
+    cand.hashHex.length >= 2 &&
+    cand.hashHex.length % 2 === 0 &&
+    HEX_RE.test(cand.hashHex) &&
+    typeof cand.iterations === 'number' &&
+    Number.isInteger(cand.iterations) &&
+    cand.iterations >= 1 &&
+    cand.iterations <= MAX_LOCK_ITERATIONS
+  );
+}
 
 /** Pattern dots are 0..8; the secret is their draw order, e.g. "0136". */
 export function patternToString(dots: number[]): string {
@@ -178,7 +201,7 @@ export function serializeLockConfig(config: LockConfig): string {
 function migrateV1(parsed: Record<string, unknown>): LockConfig | null {
   const method = parsed.method as string | undefined;
   const secretKind = parsed.secretKind as SecretKind | undefined;
-  const verifier = parsed.verifier as LockVerifier | null | undefined;
+  const verifier = parsed.verifier;
   if (method !== 'biometric' && secretKind == null) {
     return null;
   }
@@ -188,7 +211,16 @@ function migrateV1(parsed: Record<string, unknown>): LockConfig | null {
     password: null,
   };
   if (secretKind === 'pattern' || secretKind === 'password') {
-    methods[secretKind] = verifier ?? null;
+    if (verifier != null) {
+      if (!isValidVerifier(verifier)) {
+        return null;
+      }
+      methods[secretKind] = {
+        saltHex: verifier.saltHex,
+        hashHex: verifier.hashHex,
+        iterations: verifier.iterations,
+      };
+    }
   }
   return {
     enabled: hasActiveMethod({enabled: false, methods, createdAt: 0}),
@@ -203,18 +235,45 @@ export function deserializeLockConfig(raw: string | null): LockConfig | null {
   }
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed == null || typeof parsed !== 'object') {
+      return null;
+    }
     if (parsed.methods == null) {
       // v1 single-method config (<= 0.0.1-alpha.2 storage format)
       return migrateV1(parsed);
     }
-    const methods = parsed.methods as LockMethods;
-    if (
-      typeof methods.biometric !== 'boolean' ||
-      (methods.pattern != null && typeof methods.pattern.hashHex !== 'string') ||
-      (methods.password != null && typeof methods.password.hashHex !== 'string')
-    ) {
+    if (typeof parsed.methods !== 'object') {
       return null;
     }
+    const rawMethods = parsed.methods as Partial<LockMethods>;
+    if (typeof rawMethods.biometric !== 'boolean') {
+      return null;
+    }
+    if (rawMethods.pattern != null && !isValidVerifier(rawMethods.pattern)) {
+      return null;
+    }
+    if (rawMethods.password != null && !isValidVerifier(rawMethods.password)) {
+      return null;
+    }
+    const methods: LockMethods = {
+      biometric: rawMethods.biometric,
+      pattern:
+        rawMethods.pattern != null
+          ? {
+              saltHex: rawMethods.pattern.saltHex,
+              hashHex: rawMethods.pattern.hashHex,
+              iterations: rawMethods.pattern.iterations,
+            }
+          : null,
+      password:
+        rawMethods.password != null
+          ? {
+              saltHex: rawMethods.password.saltHex,
+              hashHex: rawMethods.password.hashHex,
+              iterations: rawMethods.password.iterations,
+            }
+          : null,
+    };
     return {
       enabled: hasActiveMethod({enabled: false, methods, createdAt: 0}),
       methods,

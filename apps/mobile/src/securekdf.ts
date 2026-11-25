@@ -40,6 +40,15 @@ function nativePbkdf2(): ZShellCryptoNative | null {
   return m != null && typeof m.pbkdf2Sha256Base64 === 'function' ? m : null;
 }
 
+/** Cryptographically secure random bytes backed by native SecureRandom. */
+export async function secureRandomBytes(count: number): Promise<Uint8Array> {
+  const native = NativeModules.ZShellCrypto as ZShellCryptoNative | undefined;
+  if (native != null && typeof native.secureRandomBase64 === 'function') {
+    return base64ToBytes(await native.secureRandomBase64(count));
+  }
+  throw new Error('安全随机数模块不可用');
+}
+
 async function derive(
   secret: string,
   salt: Uint8Array,

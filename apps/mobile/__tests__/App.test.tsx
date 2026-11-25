@@ -3,10 +3,12 @@
  */
 
 import React from 'react';
-import {ScrollView, Text, TouchableOpacity} from 'react-native';
+import {Modal, ScrollView, Switch, Text, TouchableOpacity} from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
+import {setPassword} from '@zshell/core-shell';
 import App from '../App';
 import * as downloads from '../src/downloads';
+import * as securekdf from '../src/securekdf';
 import {ConsentGate} from '../src/screens/ConsentGate';
 import {DataManageScreen} from '../src/screens/DataManageScreen';
 import {DiagnosticsScreen} from '../src/screens/DiagnosticsScreen';
@@ -14,6 +16,7 @@ import {DownloadsScreen} from '../src/screens/DownloadsScreen';
 import {MachineListScreen} from '../src/screens/MachineListScreen';
 import {PermissionsScreen} from '../src/screens/PermissionsScreen';
 import {SettingsScreen} from '../src/screens/SettingsScreen';
+import {ThemeProvider} from '../src/theme';
 import * as updater from '../src/updater';
 
 jest.mock('react-native-webview/lib/NativeRNCWebViewModule', () => ({
@@ -120,6 +123,159 @@ test('keeps Settings mounted and pauses its update polling under sub-screens', a
   } finally {
     await ReactTestRenderer.act(async () => renderer.unmount());
     jest.useRealTimers();
+    jest.restoreAllMocks();
+  }
+});
+
+test('SettingsScreen requires verification for lock changes, enters reset flow, routes sign-out, and clears backup modal on lock', async () => {
+  const salt = new Uint8Array(16).fill(7);
+  const lock = setPassword(
+    {enabled: false, methods: {biometric: false, pattern: null, password: null}, createdAt: 1},
+    '1234',
+    salt,
+  );
+  const sampleMachines = [
+    {
+      id: 'm1',
+      name: 'Workstation',
+      credentials: {
+        sid: 'dev-1',
+        hash: '',
+        origin: 'https://code-rc.kimi.com',
+        mid: null,
+        deviceName: null,
+        appVersion: null,
+        issuedAt: null,
+        kind: 'kimi' as const,
+      },
+      favorite: false,
+      sortOrder: 1,
+      createdAt: 1,
+      lastUsedAt: null,
+    },
+  ];
+  jest.spyOn(securekdf, 'verifySecretAsync').mockResolvedValue(true);
+  jest.spyOn(securekdf, 'secureRandomBytes').mockResolvedValue(salt);
+  jest.spyOn(securekdf, 'encryptBackupAsync').mockResolvedValue('ZSBK2.600000.TESTBACKUPBLOB');
+  const onSaveLock = jest.fn();
+  const onSignOut = jest.fn().mockResolvedValue(undefined);
+
+  const renderSettings = (visible: boolean, unlocked: boolean) => (
+    <ThemeProvider scheme="light">
+      <SettingsScreen
+        visible={visible}
+        unlocked={unlocked}
+        lock={lock}
+        onSaveLock={onSaveLock}
+        machines={sampleMachines}
+        onImportMachines={() => ({added: 0, updated: 0})}
+        onSignOutWebLogin={onSignOut}
+        onBack={() => {}}
+        onOpenPermissions={() => {}}
+        onOpenDownloads={() => {}}
+        onOpenDataManage={() => {}}
+        onOpenDiagnostics={() => {}}
+        themeMode="light"
+        onChangeThemeMode={() => {}}
+      />
+    </ThemeProvider>
+  );
+
+  let renderer!: ReturnType<typeof ReactTestRenderer.create>;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(renderSettings(true, true));
+  });
+
+  try {
+    const textOf = (t: {props: {children?: unknown}}) =>
+      Array.isArray(t.props.children)
+        ? t.props.children.map(String).join('')
+        : String(t.props.children ?? '');
+
+    const pressText = async (label: string) => {
+      const btn = renderer.root.findAllByType(TouchableOpacity).find(candidate =>
+        candidate.findAllByType(Text).some(t => textOf(t) === label),
+      );
+      if (!btn) throw new Error(`Missing button: ${label}`);
+      await ReactTestRenderer.act(async () => {
+        await btn.props.onPress();
+      });
+    };
+
+    // 1. Adding pattern while password lock is active must require verification first.
+    await pressText('设置');
+    expect(
+      renderer.root.findAllByType(Text).some(t =>
+        textOf(t).includes('设置图案（可用任意已启用的方式）'),
+      ),
+    ).toBe(true);
+
+    // 2. Changing existing password must enter passwordSet after verification succeeds
+    //    (previously overwritten back to idle).
+    await pressText('更换');
+    const secretInput = renderer.root.findAllByProps({placeholder: '当前密码'})[0];
+    await ReactTestRenderer.act(async () => {
+      secretInput.props.onChangeText('1234');
+    });
+    await pressText('验证');
+    expect(
+      renderer.root.findAllByType(Text).some(t =>
+        textOf(t).includes('设置解锁密码（至少 4 位）'),
+      ),
+    ).toBe(true);
+
+    // 3. Export backup -> verify -> generate -> confirm backup Modal opens with blob.
+    await pressText('导出备份');
+    const verifyPass = renderer.root.findAllByProps({placeholder: '当前密码'})[0];
+    await ReactTestRenderer.act(async () => {
+      verifyPass.props.onChangeText('1234');
+    });
+    await pressText('验证');
+    const pass1 = renderer.root.findAllByProps({placeholder: '备份口令'})[0];
+    const pass2 = renderer.root.findAllByProps({placeholder: '再输入一次'})[0];
+    await ReactTestRenderer.act(async () => {
+      pass1.props.onChangeText('correct-horse-1234');
+      pass2.props.onChangeText('correct-horse-1234');
+    });
+    await pressText('生成备份');
+    expect(
+      renderer.root.findAllByType(Modal).some(m => m.props.visible === true),
+    ).toBe(true);
+    expect(
+      renderer.root.findAllByType(Text).some(t => textOf(t) === 'ZSBK2.600000.TESTBACKUPBLOB'),
+    ).toBe(true);
+
+    // 4. Turning off cacheWebLogin routes through unified onSignOutWebLogin.
+    const cacheSwitch = renderer.root.findAllByType(Switch).find(sw => {
+      const parent = sw.parent;
+      return parent != null && parent.findAllByType(Text).some(t => textOf(t) === '跨重启保留登录');
+    });
+    expect(cacheSwitch).toBeDefined();
+    await ReactTestRenderer.act(async () => {
+      cacheSwitch!.props.onValueChange(false);
+    });
+    expect(onSignOut).toHaveBeenCalledTimes(1);
+
+    // 5. Locking dismisses the open backup modal AND wipes the backup blob so
+    //    re-unlocking does not reopen it.
+    await ReactTestRenderer.act(async () => {
+      renderer.update(renderSettings(false, false));
+    });
+    for (const modal of renderer.root.findAllByType(Modal)) {
+      expect(modal.props.visible).toBe(false);
+    }
+    expect(
+      renderer.root.findAllByType(Text).some(t => textOf(t) === 'ZSBK2.600000.TESTBACKUPBLOB'),
+    ).toBe(false);
+
+    await ReactTestRenderer.act(async () => {
+      renderer.update(renderSettings(true, true));
+    });
+    for (const modal of renderer.root.findAllByType(Modal)) {
+      expect(modal.props.visible).toBe(false);
+    }
+  } finally {
+    await ReactTestRenderer.act(async () => renderer.unmount());
     jest.restoreAllMocks();
   }
 });

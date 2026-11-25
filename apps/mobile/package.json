@@ -1,6 +1,6 @@
 {
   "name": "ZShell",
-  "version": "0.0.1-fork.28",
+  "version": "0.0.2",
   "private": true,
   "scripts": {
     "android": "react-native run-android",

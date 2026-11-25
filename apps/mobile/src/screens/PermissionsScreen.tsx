@@ -1,5 +1,6 @@
-import React, {useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
+  AppState,
   Linking,
   PermissionsAndroid,
   Platform,
@@ -35,7 +36,7 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
   const [notifGranted, setNotifGranted] = useState<boolean | null>(null);
   const [notifBlocked, setNotifBlocked] = useState(false);
 
-  const refreshPermissions = async () => {
+  const refreshPermissions = useCallback(async () => {
     try {
       setCamGranted(
         await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA),
@@ -62,12 +63,18 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
     } else {
       setNotifGranted(true);
     }
-  };
+  }, []);
 
   useEffect(() => {
     setPrefs(loadPrefs());
-    refreshPermissions();
-  }, []);
+    void refreshPermissions();
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        void refreshPermissions();
+      }
+    });
+    return () => sub.remove();
+  }, [refreshPermissions]);
 
   const requestPermission = async (
     permission: Parameters<typeof PermissionsAndroid.request>[0],
@@ -103,7 +110,7 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
           <Switch
             value={prefs.notificationsEnabled}
             onValueChange={on => {
-              const next = {...prefs, notificationsEnabled: on};
+              const next = {...loadPrefs(), notificationsEnabled: on};
               setPrefs(next);
               savePrefs(next);
             }}
@@ -118,7 +125,7 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
             <Text style={font.faint}>{statusText(notifGranted, notifBlocked)}</Text>
           </View>
           {notifGranted !== true ? (
-            notifBlocked ? (
+            notifBlocked || (Platform.OS === 'android' && Platform.Version < 33) ? (
               <TouchableOpacity
                 style={styles.rowButton}
                 onPress={() => Linking.openSettings()}>
@@ -150,12 +157,19 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
           <Switch
             value={prefs.quietHours.enabled}
             onValueChange={on => {
+              const latest = loadPrefs();
               const next = {
-                ...prefs,
+                ...latest,
                 quietHours: {...prefs.quietHours, enabled: on},
               };
               setPrefs(next);
-              savePrefs(next);
+              if (
+                !on ||
+                (parseClock(next.quietHours.start) != null &&
+                  parseClock(next.quietHours.end) != null)
+              ) {
+                savePrefs(next);
+              }
             }}
             trackColor={{false: colors.switchTrackOff, true: colors.accent}}
             thumbColor={colors.switchThumb}
@@ -176,12 +190,13 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
                   keyboardType="numbers-and-punctuation"
                   maxLength={5}
                   onChangeText={text => {
-                    const next = {
-                      ...prefs,
-                      quietHours: {...prefs.quietHours, [field]: text},
-                    };
+                    const nextQuiet = {...prefs.quietHours, [field]: text};
+                    const next = {...loadPrefs(), quietHours: nextQuiet};
                     setPrefs(next);
-                    if (parseClock(text) != null) {
+                    if (
+                      parseClock(nextQuiet.start) != null &&
+                      parseClock(nextQuiet.end) != null
+                    ) {
                       savePrefs(next);
                     }
                   }}

@@ -3,8 +3,10 @@ package com.zshell
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -16,6 +18,7 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 class MainActivity : ReactActivity() {
 
   private var consoleBarColor: Int? = null
+  private var sensitiveContentVisible: Boolean = false
 
   companion object {
     const val PRIVACY_PREFS = "zshell_window_privacy"
@@ -56,14 +59,23 @@ class MainActivity : ReactActivity() {
    */
   fun applyWindowPrivacy() {
     val mask = recentsMaskEnabled(this)
-    if (android.os.Build.VERSION.SDK_INT >= 36) { // BAKLAVA
+    if (Build.VERSION.SDK_INT >= 36) { // BAKLAVA
       setRecentsScreenshotEnabled(!mask)
-      window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
-    } else if (mask) {
+      if (sensitiveContentVisible) {
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+      } else {
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+      }
+    } else if (mask || sensitiveContentVisible) {
       window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
     } else {
       window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
     }
+  }
+
+  fun setSensitiveContentVisible(sensitive: Boolean) {
+    sensitiveContentVisible = sensitive
+    applyWindowPrivacy()
   }
 
   /**
@@ -99,10 +111,8 @@ class MainActivity : ReactActivity() {
    */
   @Suppress("DEPRECATION")
   fun applySystemBars() {
-    val night =
-        (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-            Configuration.UI_MODE_NIGHT_YES
     val bg = consoleBarColor ?: ContextCompat.getColor(this, R.color.app_background)
+    val lightBg = ColorUtils.calculateLuminance(bg) > 0.5
     window.setBackgroundDrawable(ColorDrawable(bg))
     // On edge-to-edge Android the system bars can be transparent; the content
     // view owns the padded inset areas behind them.
@@ -110,8 +120,8 @@ class MainActivity : ReactActivity() {
     window.statusBarColor = bg
     window.navigationBarColor = bg
     val controller = WindowCompat.getInsetsController(window, window.decorView)
-    controller.isAppearanceLightStatusBars = !night
-    controller.isAppearanceLightNavigationBars = !night
+    controller.isAppearanceLightStatusBars = lightBg
+    controller.isAppearanceLightNavigationBars = lightBg
   }
 
   fun setConsoleBarColor(color: Int?) {
@@ -135,7 +145,10 @@ class MainActivity : ReactActivity() {
    */
   override fun onPause() {
     super.onPause()
-    window.decorView.visibility = android.view.View.INVISIBLE
+    val inMultiWindow = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode
+    if ((recentsMaskEnabled(this) || sensitiveContentVisible) && !inMultiWindow) {
+      window.decorView.visibility = android.view.View.INVISIBLE
+    }
   }
 
   override fun onResume() {

@@ -57,7 +57,9 @@ export function parseConsoleEvent(raw: string): ConsoleEvent | null {
       return null;
     }
     const detail =
-      parsed.detail != null && typeof parsed.detail === 'object'
+      parsed.detail != null &&
+      typeof parsed.detail === 'object' &&
+      !Array.isArray(parsed.detail)
         ? (parsed.detail as Record<string, unknown>)
         : null;
     return {source: 'zshell', type: parsed.type as ConsoleEventType, detail};
@@ -78,6 +80,9 @@ export function deriveConsoleStatus(
     case 'ws-connected':
       return 'connected';
     case 'pair-status': {
+      if (current === 'kicked') {
+        return 'kicked';
+      }
       const status = event.detail?.status;
       if (status === 'matched') {
         return 'connected';

@@ -23,7 +23,15 @@ import {makeStyles, radius, useTheme} from '../theme';
 /** Second-level page: every download this app uid owns — update APKs and
  * files downloaded from console pages — with live progress from the system
  * download manager. */
-export function DownloadsScreen({onBack, visible}: {onBack: () => void; visible: boolean}) {
+export function DownloadsScreen({
+  onBack,
+  visible,
+  backLabel = '返回设置',
+}: {
+  onBack: () => void;
+  visible: boolean;
+  backLabel?: string;
+}) {
   const {colors, font} = useTheme();
   const styles = useStyles();
   const [items, setItems] = useState<DownloadItem[] | null>(null);
@@ -97,7 +105,7 @@ export function DownloadsScreen({onBack, visible}: {onBack: () => void; visible:
   return (
     <ScrollView style={styles.root} contentContainerStyle={{padding: 16, gap: 14}}>
       <TouchableOpacity onPress={onBack} style={{paddingVertical: 4}}>
-        <Text style={{color: colors.accent, fontSize: 16}}>‹ 返回设置</Text>
+        <Text style={{color: colors.accent, fontSize: 16}}>‹ {backLabel}</Text>
       </TouchableOpacity>
       <Text style={styles.pageTitle}>下载管理</Text>
       <Text style={font.faint}>

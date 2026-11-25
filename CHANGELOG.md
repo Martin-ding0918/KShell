@@ -3,7 +3,25 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 记录格式，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。Alpha 阶段 API 与存储格式可能调整。
 
-## [Unreleased]
+## [0.0.2] - 2026-11-25
+
+### 安全与修复
+- 加密备份（ZSBK1/ZSBK2）改为严格 canonical Base64 校验，修复宽松解码与无定界 MAC 组合导致的完整性伪造隐患。
+- 加固控制台与授权页 WebView：收紧 `originWhitelist` 为 `https://*`，实现导航与子框架白名单拦截，拒绝非 HTTPS 协议及非白名单第三方 iframe；桥接消息入口与 `rn-webview-kshell.patch` 强制校验官方控制台 HTTPS 主框架 Origin，不支持 `WebMessageListener` 的旧 WebView 不再暴露不安全回退桥；授权页标题栏随导航实时更新当前域名。
+- 修复应用锁三处缺陷：所有弹窗与锁屏状态联动并在锁屏时清空备份密文/口令防止穿透；启用锁后关闭或新增任意解锁方式均需验证并接入失败退避冷却；修复「更换图案 / 更换密码」验证通过后状态被覆盖回空闲导致无法进入重设流程的 Bug；冷启动在解锁通过前不再提前解密机器列表；锁屏与备份敏感界面在 Android 16+ 上同样强制启用 `FLAG_SECURE`。
+- 统一设置页、数据管理页与机器列表的网页登录清除逻辑：清除 Cookie/WebStorage 前先卸载保活控制台并同步更新 Kimi 登录状态，同时等待异步 Cookie 清理完成。
+- 加固应用内更新链路：强制更新地址为 HTTPS 官方 GitHub Releases，安装前校验 APK 路径边界、包名、签名证书（及官方 SHA-256 摘要，如有）并防完成广播重放；修复 `listUpdateApks` 桥接类型序列化崩溃与 `deleteUpdateApk` 路径遍历漏洞，修复超时自动取消条目在下次轮询中消失的问题及下载元数据并发读写竞态。
+- 移除 `rn-camera-kit-zxing.patch` 中残留的闭源 `play-services-mlkit-face-detection` 依赖与 GMS 引用，扫码分析器改为仅解码二维码并捕获全部 `ReaderException`。
+- Android 清单补充 `dataExtractionRules` 与 `fullBackupContent="false"` 禁用云备份与 Android 12+ 换机数据迁移，补充浏览器 `<queries>` 声明；Gradle Wrapper 补齐 `gradle-9.0.0-bin.zip` 的 `distributionSha256Sum` 校验。
+- 修复中继 WebSocket 观察器（P-2）在多连接并存时主连接事件被覆盖丢弃的问题，改为结构化协议字段校验并兼容 `new WebSocket(new URL(...))`；修复 `deriveConsoleStatus` 中 `kicked` 终态被乱序 `pair-status` 覆盖的问题；修复 `AbortSignal.any` 补丁（P-3）监听器泄漏并支持 Iterable。
+- 修复备份导入与反序列化校验（拦截 Kimi `..` 路径穿越与非法字段类型、修复损坏计数器与损坏锁配置）、预发布版本多段 SemVer 比较反转、数据管理环形图超 180° 扇区回卷覆盖、图案锁在滚动容器内触摸坐标偏移、覆盖层返回导致设置项回滚、启动更新检查每次解锁重复触发、渲染进程崩溃无限重建死循环、Android < 13 通知权限误申请、生物识别自动弹窗并发竞态，以及 `rn-webview-kshell.patch` 在 SPA 同源重定向时丢弃首帧信号的问题。
+
+### 优化
+- 将原生 `CryptoModule` 的 PBKDF2 计算移入独立后台线程，兼容空口令、拒绝越界参数并在使用后清零敏感字节数组。
+- 优化 `PngDecoder` 为按行流式反滤波（减少约 10 MB 峰值内存）并补齐 `PLTE`/`tRNS` 边界校验；`topbarActivity` 忽略 `<main>` 内流式聊天 DOM 变更并缓存顶栏皮肤状态以减少回流；`zcodeTopbar` 补齐颜色校验与旧版 WebView `light-dark()` 回退；状态栏图标明暗按实际背景亮度计算；控制台进入下载页返回按钮显示「返回控制台」。
+
+### 文档
+- 同步更新隐私政策（`docs/PRIVACY.md` 与 `apps/mobile/src/legal.ts`）、免责声明、安全说明、合规清单、架构文档与 `.github/CODEOWNERS`，修复损坏的 `LICENSE` 相对链接与拼写错误。
 
 ## [0.0.1.28] - 2026-11-24
 

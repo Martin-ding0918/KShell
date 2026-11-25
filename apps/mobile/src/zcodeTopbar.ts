@@ -34,10 +34,20 @@ export function shouldShowZcodeFooter(_page: ZcodePage, _status: ConsoleStatus, 
 //
 // The same script is injected twice (`beforeContentLoaded` and after load);
 // the second run reuses the first observer through `__zshellRefreshZcodeTopbar`.
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+
 export function buildZcodeTopbarPatch(
   colors: Record<ColorScheme, Pick<Palette, 'consoleBg' | 'consoleHeaderBg'>>,
 ): string {
   const {light, dark} = colors;
+  if (
+    !HEX_COLOR_RE.test(light.consoleBg) ||
+    !HEX_COLOR_RE.test(light.consoleHeaderBg) ||
+    !HEX_COLOR_RE.test(dark.consoleBg) ||
+    !HEX_COLOR_RE.test(dark.consoleHeaderBg)
+  ) {
+    return '';
+  }
   return String.raw`(function () {
   'use strict';
   try {
@@ -59,9 +69,12 @@ export function buildZcodeTopbarPatch(
     var paneOverlay = '[data-mobile-side-pane-overlay]';
     var style = document.createElement('style');
     style.textContent = [
-      // Match Kimi's rendered surfaces while following ZCode's own color-scheme.
-      'html[data-zshell-zcode-topbar] ' + chatSection + '{background-color:light-dark(${light.consoleBg},${dark.consoleBg})}',
-      'html[data-zshell-zcode-topbar] ' + chatSection + ' > [data-zshell-zc-row]{background-color:light-dark(${light.consoleHeaderBg},${dark.consoleHeaderBg})}',
+      // Match Kimi's rendered surfaces while following ZCode's own color-scheme
+      // (with static fallbacks for WebView < Chrome 123 where light-dark() is absent).
+      'html[data-zshell-zcode-topbar] ' + chatSection + '{background-color:${light.consoleBg};background-color:light-dark(${light.consoleBg},${dark.consoleBg})}',
+      'html.dark[data-zshell-zcode-topbar] ' + chatSection + '{background-color:${dark.consoleBg};background-color:light-dark(${light.consoleBg},${dark.consoleBg})}',
+      'html[data-zshell-zcode-topbar] ' + chatSection + ' > [data-zshell-zc-row]{background-color:${light.consoleHeaderBg};background-color:light-dark(${light.consoleHeaderBg},${dark.consoleHeaderBg})}',
+      'html.dark[data-zshell-zcode-topbar] ' + chatSection + ' > [data-zshell-zc-row]{background-color:${dark.consoleHeaderBg};background-color:light-dark(${light.consoleHeaderBg},${dark.consoleHeaderBg})}',
       // The page's own h-11 mobile header row becomes the single 48px row.
       '[data-zshell-zc-row]{position:relative;justify-content:flex-start;gap:4px;padding:0 8px 0 12px!important;height:48px!important;min-height:48px!important;max-height:48px!important;overflow:hidden}',
       // Static "task console" caption and the original back-home arrow (it
@@ -97,7 +110,7 @@ export function buildZcodeTopbarPatch(
     ].join('\n');
     var active = null, row = null, back = null, title = null, dot = null, label = null,
         sidebar = null, staticTitle = null, themeBtn = null, homeBtn = null,
-        menu = null, current = null, navDead = false, pageState = null;
+        menu = null, current = null, navDead = false, pageState = null, lastSkinKey = '';
     var ICON_BACK = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10.5 3 5.5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     var ICON_SIDEBAR = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="10" y1="2.5" x2="10" y2="13.5" stroke="currentColor" stroke-width="1.4"/></svg>';
     var render = function () {
@@ -114,11 +127,15 @@ export function buildZcodeTopbarPatch(
       if (navDead) back.setAttribute('data-zshell-zc-nav-dead', '');
       else back.removeAttribute('data-zshell-zc-nav-dead');
     };
-    var applySkin = function () {
+    var applySkin = function (force) {
       if (!row) return;
       try {
+        var docEl = document.documentElement;
+        var skinKey = (docEl.className || '') + '|' + (docEl.getAttribute('data-color-scheme') || '') + '|' + (row.className || '');
+        if (!force && skinKey === lastSkinKey) return;
+        lastSkinKey = skinKey;
         var cs = getComputedStyle(row);
-        var root = document.documentElement.style;
+        var root = docEl.style;
         var bg = cs.backgroundColor || '#fff', fg = cs.color || '#111';
         if (root.getPropertyValue('--zshell-zc-bg') !== bg) root.setProperty('--zshell-zc-bg', bg);
         if (root.getPropertyValue('--zshell-zc-fg') !== fg) root.setProperty('--zshell-zc-fg', fg);
@@ -213,6 +230,7 @@ export function buildZcodeTopbarPatch(
       staticTitle = null;
       themeBtn = null;
       homeBtn = null;
+      lastSkinKey = '';
     };
     var updateTitle = function () {
       if (!title) return;
@@ -286,7 +304,7 @@ export function buildZcodeTopbarPatch(
           staticTitle.setAttribute('data-zshell-zc-hide', '');
           homeBtn.setAttribute('data-zshell-zc-hide', '');
           if (themeBtn) themeBtn.setAttribute('data-zshell-zc-themebtn', '');
-          applySkin();
+          applySkin(false);
           updateTitle();
           if (announce) post('zshell:zcode-header-on');
           return;
@@ -327,7 +345,7 @@ export function buildZcodeTopbarPatch(
         staticTitle.setAttribute('data-zshell-zc-hide', '');
         if (themeBtn) themeBtn.setAttribute('data-zshell-zc-themebtn', '');
         document.documentElement.setAttribute('data-zshell-zcode-topbar', '');
-        applySkin();
+        applySkin(true);
         render();
         updateTitle();
         post('zshell:zcode-header-on');

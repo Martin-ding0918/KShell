@@ -50,18 +50,66 @@ diff --git a/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.j
 index 80c6803..b41f51d 100644
 --- a/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
 +++ b/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java
-@@ -327,2 +327,33 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+@@ -250,24 +250,28 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+     protected void createRNCWebViewBridge(RNCWebView webView) {
+         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)){
+           if (this.bridgeListener == null) {
+             this.bridgeListener = new WebViewCompat.WebMessageListener() {
+               @Override
+               public void onPostMessage(@NonNull WebView view, @NonNull WebMessageCompat message, @NonNull Uri sourceOrigin, boolean isMainFrame, @NonNull JavaScriptReplyProxy replyProxy) {
++                if (!isMainFrame) return;
+                 RNCWebView.this.onMessage(message.getData(), sourceOrigin.toString());
+               }
+             };
+             WebViewCompat.addWebMessageListener(
+               webView,
+               JAVASCRIPT_INTERFACE,
+-              Set.of("*"),
++              Set.of(
++                "https://code-rc.kimi.com",
++                "https://code-rc.kimi.ai",
++                "https://zcode.z.ai",
++                "https://zcode.chatglm.site"
++              ),
+               this.bridgeListener
+             );
+           }
+         } else {
+-          if (fallbackBridge == null) {
+-            fallbackBridge = new RNCWebViewBridge(webView);
+-            addJavascriptInterface(fallbackBridge, JAVASCRIPT_INTERFACE);
+-          }
++          // Legacy WebView without WebMessageListener cannot report sender frame
++          // origin reliably (fallback bridge reports top-level getUrl()); keep it disabled.
+         }
+         injectJavascriptObject();
+     }
+@@ -303,7 +307,10 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+         if (getSettings().getJavaScriptEnabled() &&
+                 injectedJS != null &&
+                 !TextUtils.isEmpty(injectedJS)) {
+             evaluateJavascriptWithFallback("(function() {\n" + injectedJS + ";\n})();");
+             injectJavascriptObject(); // re-inject the Javascript object in case it has been overwritten.
+         }
++        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) && isKShellConsoleOrigin(getUrl())) {
++            onMessage("zshell:first-paint", getUrl());
++        }
+     }
+@@ -327,2 +334,42 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
      public void onMessage(String message, String sourceUrl) {
 +        if ("zshell:first-paint".equals(message) && isKShellConsoleOrigin(sourceUrl)
 +                && android.os.Build.VERSION.SDK_INT >= 23) {
 +            post(() -> {
-+                String documentUrl = getUrl();
++                String documentOrigin = kshellOriginOf(getUrl());
 +                postVisualStateCallback(0, new VisualStateCallback() {
 +                    @Override
 +                    public void onComplete(long requestId) {
 +                        // Let the ready WebView draw underneath the React Native cover.
++                        // Compare origin (not full URL) so SPA history.replaceState or
++                        // same-origin /login redirects do not drop first-paint.
 +                        postOnAnimation(() -> postOnAnimation(() -> {
-+                            if (isAttachedToWindow() && TextUtils.equals(documentUrl, getUrl())) {
++                            if (isAttachedToWindow() && documentOrigin != null
++                                    && TextUtils.equals(documentOrigin, kshellOriginOf(getUrl()))) {
 +                                dispatchIncomingMessage(message, sourceUrl);
 +                            }
 +                        }));
@@ -71,6 +119,12 @@ index 80c6803..b41f51d 100644
 +            return;
 +        }
 +        dispatchIncomingMessage(message, sourceUrl);
++    }
++
++    private static String kshellOriginOf(String url) {
++        if (!isKShellConsoleOrigin(url)) return null;
++        Uri origin = Uri.parse(url);
++        return origin.getScheme() + "://" + origin.getHost();
 +    }
 +
 +    private static boolean isKShellConsoleOrigin(String sourceUrl) {

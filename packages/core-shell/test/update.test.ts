@@ -2,8 +2,11 @@ import {describe, expect, it} from 'vitest';
 import {
   compareVersions,
   isNewer,
+  isTrustedUpdateUrl,
   parseLatestRelease,
 } from '../src/update';
+
+const GH = 'https://github.com/Martin-ding0918/KShell/releases/download/v1.0.0';
 
 describe('compareVersions', () => {
   it.each([
@@ -18,27 +21,43 @@ describe('compareVersions', () => {
     ['0.0.1-rc.1', '0.0.1-beta.1', 1],
     ['0.0.1', '0.0.1', 0],
     ['0.0.1.11', '0.0.1.10', 1],
+    ['1.0.0-beta', '1.0.0-rc.1', -1],
+    ['1.0.0-rc1', '1.0.0-beta.2', 1],
+    ['1.0.0-dev.5', '1.0.0-alpha.1', -1],
+    ['1.0.0-beta', '1.0.0', -1],
+    ['1.0.0-alpha.1.1', '1.0.0-alpha.1', 1],
+    ['1.0.0-alpha.1', '1.0.0-alpha.1.1', -1],
+    ['1.0.0-beta.0', '1.0.0-beta', 1],
+    ['1.0.0-beta', '1.0.0-beta.0', -1],
+    ['1.0.0-alpha.1', '1.0.0-alpha.beta', -1],
   ])('%s vs %s -> %i', (a, b, expected) => {
     expect(compareVersions(a, b)).toBe(expected);
   });
 });
 
 describe('parseLatestRelease', () => {
+  const sampleDigest = 'a'.repeat(64);
   const sample = {
     tag_name: 'v0.0.1-alpha.4',
     body: '### 修复\n- 图案设置',
     published_at: '2026-10-09T10:00:00Z',
     assets: [
-      {name: 'release_notes.md', browser_download_url: 'https://x/n.md', size: 100},
-      {name: 'app-release.apk', browser_download_url: 'https://x/a.apk', size: 74000000},
+      {name: 'release_notes.md', browser_download_url: `${GH}/n.md`, size: 100},
+      {
+        name: 'app-release.apk',
+        browser_download_url: `${GH}/a.apk`,
+        size: 74000000,
+        digest: `sha256:${sampleDigest}`,
+      },
     ],
   };
 
-  it('picks the APK asset and strips the v prefix', () => {
+  it('picks the APK asset, extracts digest, and strips the v prefix', () => {
     const r = parseLatestRelease(sample)!;
     expect(r.version).toBe('0.0.1-alpha.4');
-    expect(r.apkUrl).toBe('https://x/a.apk');
+    expect(r.apkUrl).toBe(`${GH}/a.apk`);
     expect(r.apkSize).toBe(74000000);
+    expect(r.apkSha256).toBe(sampleDigest);
     expect(r.notes).toContain('图案设置');
   });
 
@@ -55,60 +74,75 @@ describe('parseLatestRelease', () => {
       parseLatestRelease({
         ...base,
         assets: [
-          {name: 'ZShell-1.0.0-universal-release.apk', browser_download_url: 'u', size: 1},
-          {name: 'ZShell-1.0.0-arm64-v8a-release.apk', browser_download_url: 'a', size: 2},
-          {name: 'ZShell-1.0.0-x86_64-release.apk', browser_download_url: 'x', size: 3},
+          {name: 'ZShell-1.0.0-universal-release.apk', browser_download_url: `${GH}/u.apk`, size: 1},
+          {name: 'ZShell-1.0.0-arm64-v8a-release.apk', browser_download_url: `${GH}/a.apk`, size: 2},
+          {name: 'ZShell-1.0.0-x86_64-release.apk', browser_download_url: `${GH}/x.apk`, size: 3},
         ],
       })!.apkUrl,
-    ).toBe('a');
+    ).toBe(`${GH}/a.apk`);
     expect(
       parseLatestRelease({
         ...base,
         assets: [
-          {name: 'ZShell-1.0.0-x86_64-release.apk', browser_download_url: 'x'},
-          {name: 'ZShell-1.0.0-universal-release.apk', browser_download_url: 'u'},
+          {name: 'ZShell-1.0.0-x86_64-release.apk', browser_download_url: `${GH}/x.apk`},
+          {name: 'ZShell-1.0.0-universal-release.apk', browser_download_url: `${GH}/u.apk`},
         ],
       })!.apkUrl,
-    ).toBe('u');
+    ).toBe(`${GH}/u.apk`);
     expect(
       parseLatestRelease({
         ...base,
-        assets: [{name: 'ZShell-1.0.0-x86_64-release.apk', browser_download_url: 'x'}],
+        assets: [{name: 'ZShell-1.0.0-x86_64-release.apk', browser_download_url: `${GH}/x.apk`}],
       })!.apkUrl,
-    ).toBe('x');
+    ).toBe(`${GH}/x.apk`);
   });
 
-  it('rejects unusable payloads', () => {
+  it('rejects unusable payloads and untrusted/cleartext download URLs', () => {
     expect(parseLatestRelease(null)).toBeNull();
     expect(parseLatestRelease({})).toBeNull();
     expect(parseLatestRelease({tag_name: 'v1.0.0', assets: []})).toBeNull();
     expect(
       parseLatestRelease({tag_name: 'v1.0.0', assets: [{name: 'x.txt'}]}),
     ).toBeNull();
+    expect(
+      parseLatestRelease({
+        tag_name: 'v1.0.0',
+        assets: [{name: 'app.apk', browser_download_url: 'http://github.com/a/b/app.apk'}],
+      }),
+    ).toBeNull();
+    expect(
+      parseLatestRelease({
+        tag_name: 'v1.0.0',
+        assets: [{name: 'app.apk', browser_download_url: 'https://evil.example/app.apk'}],
+      }),
+    ).toBeNull();
+    expect(isTrustedUpdateUrl('https://github.com/Martin-ding0918/KShell/releases/download/v1/a.apk')).toBe(true);
+    expect(isTrustedUpdateUrl('http://github.com/a.apk')).toBe(false);
+    expect(isTrustedUpdateUrl('https://github.com.evil.test/a.apk')).toBe(false);
   });
 
   it('requires an ARM64 asset when fallbacks are disabled', () => {
     const arm = {tag_name: 'v0.0.1.11', assets: [
-      {name: 'KShell-0.0.1.11-public-arm64-v8a.apk', browser_download_url: 'arm'},
+      {name: 'KShell-0.0.1.11-public-arm64-v8a.apk', browser_download_url: `${GH}/arm.apk`},
     ]};
     const other = {tag_name: 'v0.0.1.12', assets: [
-      {name: 'KShell-0.0.1.12-public-universal.apk', browser_download_url: 'universal'},
+      {name: 'KShell-0.0.1.12-public-universal.apk', browser_download_url: `${GH}/universal.apk`},
     ]};
     expect(parseLatestRelease(other, ['arm64-v8a'], true)).toBeNull();
-    expect(parseLatestRelease(arm, ['arm64-v8a'], true)?.apkUrl).toBe('arm');
+    expect(parseLatestRelease(arm, ['arm64-v8a'], true)?.apkUrl).toBe(`${GH}/arm.apk`);
   });
 
   it('honors a device-derived asset preference (translation env -> universal)', () => {
     const release = {
       tag_name: 'v1.0.0',
       assets: [
-        {name: 'ZShell-1.0.0-arm64-v8a-release.apk', browser_download_url: 'a', size: 2},
-        {name: 'ZShell-1.0.0-universal-release.apk', browser_download_url: 'u', size: 1},
-        {name: 'ZShell-1.0.0-x86_64-release.apk', browser_download_url: 'x', size: 3},
+        {name: 'ZShell-1.0.0-arm64-v8a-release.apk', browser_download_url: `${GH}/a.apk`, size: 2},
+        {name: 'ZShell-1.0.0-universal-release.apk', browser_download_url: `${GH}/u.apk`, size: 1},
+        {name: 'ZShell-1.0.0-x86_64-release.apk', browser_download_url: `${GH}/x.apk`, size: 3},
       ],
     };
-    expect(parseLatestRelease(release, ['universal'])!.apkUrl).toBe('u');
-    expect(parseLatestRelease(release, ['x86_64', 'universal'])!.apkUrl).toBe('x');
-    expect(parseLatestRelease(release, ['armeabi-v7a', 'universal'])!.apkUrl).toBe('u');
+    expect(parseLatestRelease(release, ['universal'])!.apkUrl).toBe(`${GH}/u.apk`);
+    expect(parseLatestRelease(release, ['x86_64', 'universal'])!.apkUrl).toBe(`${GH}/x.apk`);
+    expect(parseLatestRelease(release, ['armeabi-v7a', 'universal'])!.apkUrl).toBe(`${GH}/u.apk`);
   });
 });

@@ -32,4 +32,12 @@ class PrivacyWindowModule(reactContext: ReactApplicationContext) :
       activity.runOnUiThread { activity.applyWindowPrivacy() }
     }
   }
+
+  @ReactMethod
+  fun setSensitiveContentVisible(sensitive: Boolean) {
+    val activity = reactApplicationContext.currentActivity
+    if (activity is MainActivity) {
+      activity.runOnUiThread { activity.setSensitiveContentVisible(sensitive) }
+    }
+  }
 }

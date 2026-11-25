@@ -71,8 +71,10 @@ export function decodePng(bytes: Uint8Array): RgbaImage | null {
         return null;
       }
     } else if (type === 'PLTE') {
+      if (len === 0 || len > 768 || len % 3 !== 0) return null;
       palette = data.slice();
     } else if (type === 'tRNS') {
+      if (len > 256 && colorType === 3) return null;
       trns = data.slice();
     } else if (type === 'IDAT') {
       if (data.length > 0) idat.push(data);
@@ -84,8 +86,10 @@ export function decodePng(bytes: Uint8Array): RgbaImage | null {
   if (width <= 0 || height <= 0 || colorType < 0 || idat.length === 0) {
     return null;
   }
-  if (colorType === 3 && palette == null) {
-    return null;
+  if (colorType === 3) {
+    if (palette == null || (trns != null && trns.length > palette.length / 3)) {
+      return null;
+    }
   }
 
   const channels = CHANNELS[colorType];
@@ -110,18 +114,19 @@ export function decodePng(bytes: Uint8Array): RgbaImage | null {
     return null;
   }
 
-  // Unfilter scanlines into recon (row-major pixels, channels each).
-  const recon = new Uint8Array(height * stride);
+  // Unfilter row-by-row directly into RGBA using two 1-row scratch buffers
+  // instead of holding a full intermediate recon image in memory.
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  let prevRow = new Uint8Array(stride);
+  let currRow = new Uint8Array(stride);
   let src = 0;
   for (let y = 0; y < height; y++) {
     const filter = raw[src++];
-    const rowStart = y * stride;
-    const prevRowStart = (y - 1) * stride;
     for (let x = 0; x < stride; x++) {
       const filt = raw[src + x];
-      const left = x >= bpp ? recon[rowStart + x - bpp] : 0;
-      const up = y > 0 ? recon[prevRowStart + x] : 0;
-      const upLeft = y > 0 && x >= bpp ? recon[prevRowStart + x - bpp] : 0;
+      const left = x >= bpp ? currRow[x - bpp] : 0;
+      const up = y > 0 ? prevRow[x] : 0;
+      const upLeft = y > 0 && x >= bpp ? prevRow[x - bpp] : 0;
       let value: number;
       switch (filter) {
         case 0:
@@ -142,49 +147,53 @@ export function decodePng(bytes: Uint8Array): RgbaImage | null {
         default:
           return null;
       }
-      recon[rowStart + x] = value & 0xff;
+      currRow[x] = value & 0xff;
     }
     src += stride;
-  }
 
-  const rgba = new Uint8ClampedArray(width * height * 4);
-  for (let p = 0; p < width * height; p++) {
-    const o = p * channels;
-    const q = p * 4;
-    switch (colorType) {
-      case 0:
-        rgba[q] = recon[o];
-        rgba[q + 1] = recon[o];
-        rgba[q + 2] = recon[o];
-        rgba[q + 3] = 255;
-        break;
-      case 2:
-        rgba[q] = recon[o];
-        rgba[q + 1] = recon[o + 1];
-        rgba[q + 2] = recon[o + 2];
-        rgba[q + 3] = 255;
-        break;
-      case 3: {
-        const idx = recon[o];
-        rgba[q] = palette![idx * 3];
-        rgba[q + 1] = palette![idx * 3 + 1];
-        rgba[q + 2] = palette![idx * 3 + 2];
-        rgba[q + 3] = trns != null && idx < trns.length ? trns[idx] : 255;
-        break;
+    const rowPixelBase = y * width;
+    for (let x = 0; x < width; x++) {
+      const o = x * channels;
+      const q = (rowPixelBase + x) * 4;
+      switch (colorType) {
+        case 0:
+          rgba[q] = currRow[o];
+          rgba[q + 1] = currRow[o];
+          rgba[q + 2] = currRow[o];
+          rgba[q + 3] = 255;
+          break;
+        case 2:
+          rgba[q] = currRow[o];
+          rgba[q + 1] = currRow[o + 1];
+          rgba[q + 2] = currRow[o + 2];
+          rgba[q + 3] = 255;
+          break;
+        case 3: {
+          const idx = currRow[o];
+          if (idx * 3 + 2 >= palette!.length) return null;
+          rgba[q] = palette![idx * 3];
+          rgba[q + 1] = palette![idx * 3 + 1];
+          rgba[q + 2] = palette![idx * 3 + 2];
+          rgba[q + 3] = trns != null && idx < trns.length ? trns[idx] : 255;
+          break;
+        }
+        case 4:
+          rgba[q] = currRow[o];
+          rgba[q + 1] = currRow[o];
+          rgba[q + 2] = currRow[o];
+          rgba[q + 3] = currRow[o + 1];
+          break;
+        case 6:
+          rgba[q] = currRow[o];
+          rgba[q + 1] = currRow[o + 1];
+          rgba[q + 2] = currRow[o + 2];
+          rgba[q + 3] = currRow[o + 3];
+          break;
       }
-      case 4:
-        rgba[q] = recon[o];
-        rgba[q + 1] = recon[o];
-        rgba[q + 2] = recon[o];
-        rgba[q + 3] = recon[o + 1];
-        break;
-      case 6:
-        rgba[q] = recon[o];
-        rgba[q + 1] = recon[o + 1];
-        rgba[q + 2] = recon[o + 2];
-        rgba[q + 3] = recon[o + 3];
-        break;
     }
+    const swap = prevRow;
+    prevRow = currRow;
+    currRow = swap;
   }
   return {width, height, rgba};
 }
