@@ -292,5 +292,19 @@ describe('MachineRegistry', () => {
     if (!added.ok) return;
     expect(added.record.id).toBe('m6');
     expect(added.record.sortOrder).toBe(11);
+
+    // Overflowing machine id / fractional sortOrder must not corrupt counters to Infinity/NaN.
+    const overflow = JSON.stringify({
+      version: 1,
+      machines: [{...m, id: `m${'9'.repeat(309)}`, sortOrder: 1.5}],
+      nextId: Number.MAX_SAFE_INTEGER,
+      nextSortOrder: 1e308,
+    });
+    const safeRestored = MachineRegistry.fromJSON(overflow)!;
+    const nextAdded = safeRestored.addFromUrl('https://zcode.z.ai/remote/v4?sid=sid-safe&hash=b');
+    expect(nextAdded.ok).toBe(true);
+    if (!nextAdded.ok) return;
+    expect(nextAdded.record.id).toBe('m1');
+    expect(Number.isSafeInteger(nextAdded.record.sortOrder)).toBe(true);
   });
 });

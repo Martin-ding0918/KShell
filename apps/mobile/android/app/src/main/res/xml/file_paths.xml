@@ -2,6 +2,8 @@
 <paths>
     <!-- In-app update APKs land in getExternalFilesDir(DIRECTORY_DOWNLOADS). -->
     <external-files-path name="updates" path="Download/" />
+    <!-- App-private staged copy verified before handing to the system installer. -->
+    <cache-path name="verified_updates" path="updates/" />
     <!-- Encrypted backups shared via the system share sheet. -->
     <cache-path name="share" path="share/" />
 </paths>

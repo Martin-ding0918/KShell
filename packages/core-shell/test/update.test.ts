@@ -119,6 +119,28 @@ describe('parseLatestRelease', () => {
     expect(isTrustedUpdateUrl('https://github.com/Martin-ding0918/KShell/releases/download/v1/a.apk')).toBe(true);
     expect(isTrustedUpdateUrl('http://github.com/a.apk')).toBe(false);
     expect(isTrustedUpdateUrl('https://github.com.evil.test/a.apk')).toBe(false);
+    expect(isTrustedUpdateUrl('https://github.com:8443/a.apk')).toBe(false);
+    expect(isTrustedUpdateUrl('https://evil@github.com/a.apk')).toBe(false);
+    expect(parseLatestRelease({tag_name: 'v1.0.0', assets: [null]})).toBeNull();
+    expect(
+      parseLatestRelease({
+        tag_name: 'v1.0.0',
+        assets: [
+          {
+            name: 'KShell-1.0.0-arm64-v8a.apk',
+            browser_download_url:
+              'https://github.com/Martin-ding0918/KShell/releases/download/../../../../attacker/evil/releases/download/v1/a.apk',
+          },
+        ],
+      })?.apkUrl,
+    ).toBe('https://github.com/attacker/evil/releases/download/v1/a.apk');
+  });
+
+  it('keeps pre-release comparison antisymmetric for leading zeros and Object.prototype names', () => {
+    expect(compareVersions('1.0.0-alpha.01', '1.0.0-alpha.1')).toBe(0);
+    expect(compareVersions('1.0.0-alpha.1', '1.0.0-alpha.01')).toBe(0);
+    expect(compareVersions('1.0.0-constructor.1', '1.0.0-alpha.1')).toBe(-1);
+    expect(compareVersions('1.0.0-alpha.1', '1.0.0-constructor.1')).toBe(1);
   });
 
   it('requires an ARM64 asset when fallbacks are disabled', () => {

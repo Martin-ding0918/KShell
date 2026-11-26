@@ -158,16 +158,20 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
             value={prefs.quietHours.enabled}
             onValueChange={on => {
               const latest = loadPrefs();
+              const valid =
+                parseClock(prefs.quietHours.start) != null &&
+                parseClock(prefs.quietHours.end) != null;
+              const nextQuiet = valid
+                ? {...prefs.quietHours, enabled: on}
+                : !on
+                  ? {...latest.quietHours, enabled: false}
+                  : {...prefs.quietHours, enabled: on};
               const next = {
                 ...latest,
-                quietHours: {...prefs.quietHours, enabled: on},
+                quietHours: nextQuiet,
               };
               setPrefs(next);
-              if (
-                !on ||
-                (parseClock(next.quietHours.start) != null &&
-                  parseClock(next.quietHours.end) != null)
-              ) {
+              if (!on || valid) {
                 savePrefs(next);
               }
             }}

@@ -18,11 +18,18 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 class MainActivity : ReactActivity() {
 
   private var consoleBarColor: Int? = null
-  private var sensitiveContentVisible: Boolean = false
 
   companion object {
     const val PRIVACY_PREFS = "zshell_window_privacy"
     const val KEY_RECENTS_MASK = "recents_mask"
+
+    @Volatile
+    private var sensitiveContentVisible: Boolean = false
+
+    @JvmStatic
+    fun updateSensitiveContentVisible(sensitive: Boolean) {
+      sensitiveContentVisible = sensitive
+    }
 
     /** The recents mask defaults to on; only the settings toggle may disable it. */
     @JvmStatic

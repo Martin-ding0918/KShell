@@ -102,7 +102,7 @@ export async function verifySecretAsync(
     hexToBytes(verifier.saltHex),
     verifier.iterations,
   );
-  return constantTimeEqual(bytesToHex(hash), verifier.hashHex);
+  return constantTimeEqual(bytesToHex(hash), verifier.hashHex.toLowerCase());
 }
 
 // ---------- machine backup ----------

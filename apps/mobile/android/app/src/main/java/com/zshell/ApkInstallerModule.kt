@@ -97,14 +97,24 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
         synchronized(metaLock) { autoInstalledIds.remove(id) }
         return
       }
-      val dir = downloadDir() ?: return
+      val dir = downloadDir()
+      if (dir == null) {
+        synchronized(metaLock) { autoInstalledIds.remove(id) }
+        return
+      }
       val apk = File(dir, meta.fileName)
-      verifyExecutor.execute {
-        if (verifyUpdateApk(apk, meta.sha256) == null) {
-          installApk(apk)
-        } else {
-          apk.delete()
+      try {
+        verifyExecutor.execute {
+          val (staged, failure) = stageAndVerifyUpdateApk(apk, meta.sha256)
+          if (staged != null && failure == null) {
+            installApk(staged)
+          } else {
+            apk.delete()
+            recordVerificationFailure(id, failure ?: "安装包安全校验失败，已中止安装")
+          }
         }
+      } catch (_: Exception) {
+        synchronized(metaLock) { autoInstalledIds.remove(id) }
       }
     }
   }
@@ -231,7 +241,11 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
       return
     }
     val host = parsedUrl.host?.lowercase() ?: ""
-    if (kind == KIND_UPDATE && host !in TRUSTED_UPDATE_HOSTS) {
+    val port = parsedUrl.port
+    if (kind == KIND_UPDATE &&
+        (host !in TRUSTED_UPDATE_HOSTS ||
+            (port != -1 && port != 443) ||
+            !parsedUrl.userInfo.isNullOrEmpty())) {
       promise.reject("HOST", "不受信任的更新包下载地址")
       return
     }
@@ -315,19 +329,24 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
         return
       }
       val parsedUri = Uri.parse(meta.url)
+      val port = parsedUri.port
       if (parsedUri.scheme?.lowercase() != "https" ||
-          (meta.kind == KIND_UPDATE && parsedUri.host?.lowercase() !in TRUSTED_UPDATE_HOSTS)) {
+          (meta.kind == KIND_UPDATE &&
+              (parsedUri.host?.lowercase() !in TRUSTED_UPDATE_HOSTS ||
+                  (port != -1 && port != 443) ||
+                  !parsedUri.userInfo.isNullOrEmpty()))) {
         promise.reject("RESUME", "下载地址不受信任")
         return
       }
       val request = buildRequest(parsedUri, meta.fileName, meta.kind)
-      dm.remove(lid)
-      val newId = dm.enqueue(request)
-      synchronized(metaLock) {
+      val newId = synchronized(metaLock) {
+        dm.remove(lid)
+        val enqueuedId = dm.enqueue(request)
         autoInstalledIds.remove(lid)
         saveMetaLocked(
             loadMetaLocked().filterNot { it.id == lid } +
-                meta.copy(id = newId, lastBytes = 0L, lastMoveAt = System.currentTimeMillis()))
+                meta.copy(id = enqueuedId, lastBytes = 0L, lastMoveAt = System.currentTimeMillis()))
+        enqueuedId
       }
       promise.resolve(newId.toDouble())
     } catch (e: Exception) {
@@ -503,32 +522,43 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
     try {
       if (meta != null && meta.url.isNotEmpty()) {
         val dir = downloadDir() ?: error("外部存储不可用")
+        val canonicalDir = dir.canonicalFile
         val file = File(dir, meta.fileName)
-        if (!file.exists()) {
+        val canonicalFile = file.canonicalFile
+        if (canonicalFile.parentFile != canonicalDir) {
+          promise.reject("OPEN", "文件路径无效")
+          return
+        }
+        if (!canonicalFile.isFile) {
           promise.reject("OPEN", "文件不存在（可能已被清理）")
           return
         }
         if (meta.kind == KIND_UPDATE) {
-          verifyExecutor.execute {
-            val failure = verifyUpdateApk(file, meta.sha256)
-            if (failure != null) {
-              file.delete()
-              promise.reject("VERIFY", failure)
-              return@execute
+          try {
+            verifyExecutor.execute {
+              val (staged, failure) = stageAndVerifyUpdateApk(canonicalFile, meta.sha256)
+              if (staged == null || failure != null) {
+                canonicalFile.delete()
+                recordVerificationFailure(lid, failure ?: "安装包安全校验失败，已中止安装")
+                promise.reject("VERIFY", failure ?: "安装包安全校验失败，已中止安装")
+                return@execute
+              }
+              try {
+                val uri = FileProvider.getUriForFile(
+                    reactContext, "${reactContext.packageName}.fileprovider", staged)
+                viewFile(uri, APK_MIME, promise)
+              } catch (e: Exception) {
+                promise.reject("OPEN", e.message ?: "无法打开安装包", e)
+              }
             }
-            try {
-              val uri = FileProvider.getUriForFile(
-                  reactContext, "${reactContext.packageName}.fileprovider", file)
-              viewFile(uri, APK_MIME, promise)
-            } catch (e: Exception) {
-              promise.reject("OPEN", e.message ?: "无法打开安装包", e)
-            }
+          } catch (e: Exception) {
+            promise.reject("OPEN", e.message ?: "无法打开安装包", e)
           }
           return
         }
         val uri =
             FileProvider.getUriForFile(
-                reactContext, "${reactContext.packageName}.fileprovider", file)
+                reactContext, "${reactContext.packageName}.fileprovider", canonicalFile)
         viewFile(uri, mimeFor(meta.fileName), promise)
       } else {
         val uri = dm.getUriForDownloadedFile(lid)
@@ -653,6 +683,11 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
           saveMetaLocked(metas)
         }
       }
+      val stageDir = File(reactContext.cacheDir, "updates").canonicalFile
+      val stagedTarget = File(stageDir, name).canonicalFile
+      if (stagedTarget.parentFile == stageDir && stagedTarget.exists()) {
+        stagedTarget.delete()
+      }
       // Fallback for files whose record is already gone (canonical boundary check).
       val dir = reactContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return
       val canonicalDir = dir.canonicalFile
@@ -708,17 +743,78 @@ class ApkInstallerModule(private val reactContext: ReactApplicationContext) :
   // ---------- helpers ----------
 
   /**
-   * Verify an update APK before handing it to the system package installer:
-   * 1. File resides strictly inside our private downloads directory.
+   * Copy an update APK from external downloads into app-private cache before
+   * verifying and handing it to the system installer, eliminating external
+   * storage TOCTOU swaps between verification and install.
+   */
+  private fun stageAndVerifyUpdateApk(
+      sourceApk: File,
+      expectedSha256: String?,
+  ): Pair<File?, String?> {
+    var staged: File? = null
+    try {
+      val downloadRoot = downloadDir()?.canonicalFile ?: return Pair(null, "外部存储不可用")
+      val canonicalSource = sourceApk.canonicalFile
+      if (canonicalSource.parentFile != downloadRoot || !canonicalSource.isFile) {
+        return Pair(null, "安装包路径无效")
+      }
+      val stageDir = File(reactContext.cacheDir, "updates")
+      if (!stageDir.exists() && !stageDir.mkdirs()) {
+        return Pair(null, "无法准备私有校验目录")
+      }
+      val canonicalStageDir = stageDir.canonicalFile
+      canonicalStageDir.listFiles()?.forEach { it.delete() }
+      val safeName = sanitizeFileName(canonicalSource.name)
+      val target = File(canonicalStageDir, safeName)
+      if (target.canonicalFile.parentFile != canonicalStageDir) {
+        return Pair(null, "安装包路径无效")
+      }
+      canonicalSource.copyTo(target, overwrite = true)
+      staged = target
+      val failure = verifyUpdateApk(target, canonicalStageDir, expectedSha256)
+      if (failure != null) {
+        target.delete()
+        return Pair(null, failure)
+      }
+      return Pair(target, null)
+    } catch (_: Exception) {
+      staged?.delete()
+      return Pair(null, "安装包安全校验失败，已中止安装")
+    }
+  }
+
+  /** Mark an update download failed after integrity/signature verification fails. */
+  private fun recordVerificationFailure(id: Long, reason: String) {
+    try {
+      dm.remove(id)
+    } catch (_: Exception) {
+      // already gone
+    }
+    synchronized(metaLock) {
+      autoInstalledIds.remove(id)
+      val updated = loadMetaLocked().map { m ->
+        if (m.id == id) m.copy(deadReason = reason) else m
+      }
+      saveMetaLocked(updated)
+    }
+  }
+
+  /**
+   * Verify a staged app-private update APK before handing it to the system
+   * package installer:
+   * 1. File resides strictly inside our app-private staging directory.
    * 2. If GitHub release metadata supplied a SHA-256 digest, the file matches it.
    * 3. Archive package name and signing certificate match the running app.
    * Returns null when valid, or a user-facing error message on mismatch.
    */
-  private fun verifyUpdateApk(apk: File, expectedSha256: String?): String? {
+  private fun verifyUpdateApk(
+      apk: File,
+      expectedParentDir: File,
+      expectedSha256: String?,
+  ): String? {
     try {
-      val dir = downloadDir()?.canonicalFile ?: return "外部存储不可用"
       val canonicalApk = apk.canonicalFile
-      if (canonicalApk.parentFile != dir || !canonicalApk.isFile) {
+      if (canonicalApk.parentFile != expectedParentDir || !canonicalApk.isFile) {
         return "安装包路径无效"
       }
       if (expectedSha256 != null) {

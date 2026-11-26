@@ -30,6 +30,9 @@ export function PatternPad({size = 300, onComplete, hint}: PatternPadProps) {
   const selectedRef = useRef<number[]>([]);
   const originRef = useRef({x: 0, y: 0});
   const padRef = useRef<View>(null);
+  const activeRef = useRef(false);
+  const gestureIdRef = useRef(0);
+  const rawPointsRef = useRef<Array<{pageX: number; pageY: number}>>([]);
   // PanResponder is created once at mount; keep the latest callback in a ref
   // so step changes (e.g. "draw again to confirm") aren't lost to a stale
   // closure captured by the frozen responder.
@@ -57,7 +60,20 @@ export function PatternPad({size = 300, onComplete, hint}: PatternPadProps) {
     }
   };
 
+  const recomputeFromRawPoints = () => {
+    const next: number[] = [];
+    for (const pt of rawPointsRef.current) {
+      const idx = hitTest(pt.pageX, pt.pageY);
+      if (idx >= 0 && !next.includes(idx)) {
+        next.push(idx);
+      }
+    }
+    selectedRef.current = next;
+    setSelected(next);
+  };
+
   const resetSelection = () => {
+    rawPointsRef.current = [];
     selectedRef.current = [];
     setSelected([]);
   };
@@ -69,21 +85,34 @@ export function PatternPad({size = 300, onComplete, hint}: PatternPadProps) {
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: e => {
         const {pageX, pageY} = e.nativeEvent;
+        const gestureId = ++gestureIdRef.current;
+        activeRef.current = true;
         resetSelection();
+        rawPointsRef.current.push({pageX, pageY});
+        handlePoint(pageX, pageY);
         const node = padRef.current;
         if (node != null && typeof node.measureInWindow === 'function') {
           node.measureInWindow((x, y) => {
+            const changed = originRef.current.x !== x || originRef.current.y !== y;
             originRef.current = {x, y};
-            handlePoint(pageX, pageY);
+            if (!activeRef.current || gestureIdRef.current !== gestureId) {
+              return;
+            }
+            if (changed) {
+              recomputeFromRawPoints();
+            }
           });
-        } else {
-          handlePoint(pageX, pageY);
         }
       },
       onPanResponderMove: e => {
-        handlePoint(e.nativeEvent.pageX, e.nativeEvent.pageY);
+        if (!activeRef.current) return;
+        const {pageX, pageY} = e.nativeEvent;
+        rawPointsRef.current.push({pageX, pageY});
+        handlePoint(pageX, pageY);
       },
       onPanResponderRelease: () => {
+        activeRef.current = false;
+        gestureIdRef.current += 1;
         const dots = selectedRef.current;
         if (dots.length >= 4) {
           onCompleteRef.current(dots);
@@ -91,6 +120,8 @@ export function PatternPad({size = 300, onComplete, hint}: PatternPadProps) {
         resetSelection();
       },
       onPanResponderTerminate: () => {
+        activeRef.current = false;
+        gestureIdRef.current += 1;
         resetSelection();
       },
     }),

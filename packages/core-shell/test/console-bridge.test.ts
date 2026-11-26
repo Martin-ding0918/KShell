@@ -31,7 +31,7 @@ describe('deriveConsoleStatus', () => {
     parseConsoleEvent(JSON.stringify({source: 'zshell', type, detail}))!;
 
   it('follows the connection lifecycle', () => {
-    let s = 'connecting' as const;
+    let s: ReturnType<typeof deriveConsoleStatus> = 'connecting';
     s = deriveConsoleStatus(s, ev('ws-open'));
     expect(s).toBe('connecting');
     s = deriveConsoleStatus(s, ev('ws-connected'));

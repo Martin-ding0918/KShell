@@ -36,21 +36,35 @@ const TRUSTED_UPDATE_HOSTS = new Set([
   'release-assets.githubusercontent.com',
 ]);
 
-/** Only HTTPS URLs hosted on official GitHub release domains are accepted. */
-export function isTrustedUpdateUrl(raw: string): boolean {
+/** Normalize and validate an official GitHub HTTPS release asset URL. */
+function normalizeTrustedUpdateUrl(raw: string): string | null {
   try {
-    const url = new URL(raw);
-    return url.protocol === 'https:' && TRUSTED_UPDATE_HOSTS.has(url.hostname.toLowerCase());
+    const url = new URL(raw.trim());
+    if (
+      url.protocol !== 'https:' ||
+      url.port !== '' ||
+      url.username !== '' ||
+      url.password !== '' ||
+      !TRUSTED_UPDATE_HOSTS.has(url.hostname.toLowerCase())
+    ) {
+      return null;
+    }
+    return url.href;
   } catch {
-    return false;
+    return null;
   }
 }
 
-const PRE_CHANNEL_RANK: Record<string, number> = {
-  alpha: 1,
-  beta: 2,
-  rc: 3,
-};
+/** Only HTTPS URLs hosted on official GitHub release domains are accepted. */
+export function isTrustedUpdateUrl(raw: string): boolean {
+  return normalizeTrustedUpdateUrl(raw) != null;
+}
+
+const PRE_CHANNEL_RANK: ReadonlyMap<string, number> = new Map([
+  ['alpha', 1],
+  ['beta', 2],
+  ['rc', 3],
+]);
 
 function tokenizePreRelease(raw: string): string[] {
   const parts = raw.toLowerCase().split('.');
@@ -74,8 +88,8 @@ function comparePreRelease(aRaw: string, bRaw: string): number {
     if (pb === undefined) return 1;
     if (pa === pb) continue;
     if (i === 0) {
-      const ra = PRE_CHANNEL_RANK[pa] ?? 0;
-      const rb = PRE_CHANNEL_RANK[pb] ?? 0;
+      const ra = PRE_CHANNEL_RANK.get(pa) ?? 0;
+      const rb = PRE_CHANNEL_RANK.get(pb) ?? 0;
       if (ra !== rb) {
         return ra > rb ? 1 : -1;
       }
@@ -83,7 +97,10 @@ function comparePreRelease(aRaw: string, bRaw: string): number {
     const na = /^\d+$/.test(pa);
     const nb = /^\d+$/.test(pb);
     if (na && nb) {
-      return Number(pa) > Number(pb) ? 1 : -1;
+      const numA = Number(pa);
+      const numB = Number(pb);
+      if (numA === numB) continue;
+      return numA > numB ? 1 : -1;
     }
     if (na !== nb) {
       return na ? -1 : 1;
@@ -150,6 +167,8 @@ function pickApkAsset(
 ): AssetLike | null {
   const apks = assets.filter(
     a =>
+      a != null &&
+      typeof a === 'object' &&
       typeof a.name === 'string' &&
       (a.name as string).endsWith('.apk') &&
       typeof a.browser_download_url === 'string' &&
@@ -182,7 +201,11 @@ export function parseLatestRelease(
   }
   const assets = Array.isArray(rel.assets) ? (rel.assets as AssetLike[]) : [];
   const apk = pickApkAsset(assets, prefer, requirePreferred);
-  if (typeof apk?.browser_download_url !== 'string') {
+  const apkUrl =
+    typeof apk?.browser_download_url === 'string'
+      ? normalizeTrustedUpdateUrl(apk.browser_download_url)
+      : null;
+  if (apk == null || apkUrl == null) {
     return null;
   }
   const apkSha256 = parseSha256Digest(apk.digest);
@@ -190,7 +213,7 @@ export function parseLatestRelease(
     version: rel.tag_name.replace(/^v/i, ''),
     tag: rel.tag_name,
     notes: typeof rel.body === 'string' ? rel.body : '',
-    apkUrl: apk.browser_download_url,
+    apkUrl,
     apkSize: typeof apk.size === 'number' ? apk.size : null,
     ...(apkSha256 != null ? {apkSha256} : {}),
     publishedAt: typeof rel.published_at === 'string' ? rel.published_at : null,

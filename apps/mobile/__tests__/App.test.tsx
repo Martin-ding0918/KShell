@@ -5,7 +5,7 @@
 import React from 'react';
 import {Modal, ScrollView, Switch, Text, TouchableOpacity} from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
-import {setPassword} from '@zshell/core-shell';
+import {installVerifier, makeVerifier} from '@zshell/core-shell';
 import App from '../App';
 import * as downloads from '../src/downloads';
 import * as securekdf from '../src/securekdf';
@@ -19,10 +19,20 @@ import {SettingsScreen} from '../src/screens/SettingsScreen';
 import {ThemeProvider} from '../src/theme';
 import * as updater from '../src/updater';
 
-jest.mock('react-native-webview/lib/NativeRNCWebViewModule', () => ({
-  __esModule: true,
-  default: {},
-}));
+jest.mock('react-native-webview', () => {
+  const ReactLib = require('react');
+  const WebView = ReactLib.forwardRef(
+    (props: Record<string, unknown>, ref: unknown) => {
+      ReactLib.useImperativeHandle(ref, () => ({
+        injectJavaScript: jest.fn(),
+        reload: jest.fn(),
+        goBack: jest.fn(),
+      }));
+      return ReactLib.createElement('RNCWebView', props);
+    },
+  );
+  return {__esModule: true, WebView, default: WebView};
+});
 
 jest.mock('react-native-camera-kit', () => ({Camera: 'Camera'}));
 
@@ -47,6 +57,7 @@ jest.mock('react-native-mmkv-storage', () => ({
 }));
 
 test('renders the initial consent screen and opens the machine list on acceptance', async () => {
+  jest.spyOn(updater, 'fetchLatestRelease').mockResolvedValue(null);
   let renderer!: ReturnType<typeof ReactTestRenderer.create>;
   await ReactTestRenderer.act(async () => {
     renderer = ReactTestRenderer.create(<App />);
@@ -59,11 +70,15 @@ test('renders the initial consent screen and opens the machine list on acceptanc
     expect(renderer.root.findAllByType(MachineListScreen)).toHaveLength(1);
   } finally {
     await ReactTestRenderer.act(async () => renderer.unmount());
+    jest.restoreAllMocks();
   }
 });
 
 test('keeps Settings mounted and pauses its update polling under sub-screens', async () => {
-  jest.useFakeTimers();
+  // StatusBar caches its last setImmediate handle across tests; faking
+  // setImmediate/clearImmediate leaves a sinon fake handle that later breaks
+  // Node's real clearImmediate queue once useRealTimers() runs.
+  jest.useFakeTimers({doNotFake: ['setImmediate', 'clearImmediate']});
   jest.spyOn(updater, 'fetchLatestRelease').mockResolvedValue({
     version: '99.0.0', tag: 'v99.0.0', notes: '', apkUrl: 'https://example.invalid/test.apk',
     apkSize: null, publishedAt: null,
@@ -129,10 +144,10 @@ test('keeps Settings mounted and pauses its update polling under sub-screens', a
 
 test('SettingsScreen requires verification for lock changes, enters reset flow, routes sign-out, and clears backup modal on lock', async () => {
   const salt = new Uint8Array(16).fill(7);
-  const lock = setPassword(
+  const lock = installVerifier(
     {enabled: false, methods: {biometric: false, pattern: null, password: null}, createdAt: 1},
-    '1234',
-    salt,
+    'password',
+    makeVerifier('1234', salt, 100),
   );
   const sampleMachines = [
     {
@@ -277,5 +292,113 @@ test('SettingsScreen requires verification for lock changes, enters reset flow, 
   } finally {
     await ReactTestRenderer.act(async () => renderer.unmount());
     jest.restoreAllMocks();
+  }
+});
+
+test('ConsentGate hides its legal modal when visible is false (app locked)', async () => {
+  let renderer!: ReturnType<typeof ReactTestRenderer.create>;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <ThemeProvider scheme="light">
+        <ConsentGate onAgree={() => {}} visible={true} />
+      </ThemeProvider>,
+    );
+  });
+
+  try {
+    const privacyBtn = renderer.root.findAllByType(TouchableOpacity).find(btn =>
+      btn.findAllByType(Text).some(t => t.props.children === '《隐私政策》'),
+    );
+    expect(privacyBtn).toBeDefined();
+    await ReactTestRenderer.act(async () => {
+      privacyBtn!.props.onPress();
+    });
+    expect(renderer.root.findByType(Modal).props.visible).toBe(true);
+
+    await ReactTestRenderer.act(async () => {
+      renderer.update(
+        <ThemeProvider scheme="light">
+          <ConsentGate onAgree={() => {}} visible={false} />
+        </ThemeProvider>,
+      );
+    });
+    expect(renderer.root.findByType(Modal).props.visible).toBe(false);
+  } finally {
+    await ReactTestRenderer.act(async () => renderer.unmount());
+  }
+});
+
+test('ConsoleScreen keeps auth overlay WebView source stable across cross-host OAuth redirects', async () => {
+  const {AppState} = require('react-native');
+  const {WebView} = require('react-native-webview');
+  const {ConsoleScreen} = require('../src/screens/ConsoleScreen');
+  const prevAppState = AppState.currentState;
+  AppState.currentState = 'active';
+
+  const machine = {
+    id: 'm1',
+    name: 'Kimi Desktop',
+    credentials: {
+      kind: 'kimi' as const,
+      sid: 'dev-abc',
+      hash: '',
+      origin: 'https://code-rc.kimi.com',
+      mid: null,
+      deviceName: null,
+      appVersion: null,
+      issuedAt: null,
+      source: 'kimi_code_desktop',
+      extraQuery: 'rc=1',
+    },
+    favorite: false,
+    sortOrder: 1,
+    createdAt: 1,
+    lastUsedAt: null,
+  };
+
+  let renderer!: ReturnType<typeof ReactTestRenderer.create>;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <ThemeProvider scheme="dark">
+        <ConsoleScreen
+          machine={machine}
+          foreground={true}
+          onBack={() => {}}
+          registerBackHandler={() => {}}
+          onOpenDownloads={() => {}}
+        />
+      </ThemeProvider>,
+    );
+  });
+
+  try {
+    const mainWebView = renderer.root.findAllByType(WebView)[0];
+    expect(mainWebView.props.originWhitelist).toContain('about:blank');
+
+    await ReactTestRenderer.act(async () => {
+      mainWebView.props.onOpenWindow({
+        nativeEvent: {targetUrl: 'https://auth.kimi.ai/oauth/start'},
+      });
+    });
+
+    const authWebViewBefore = renderer.root.findAllByType(WebView)[1];
+    expect(authWebViewBefore).toBeDefined();
+    const initialSourceRef = authWebViewBefore.props.source;
+    expect(initialSourceRef).toEqual({uri: 'https://auth.kimi.ai/oauth/start'});
+    expect(authWebViewBefore.props.originWhitelist).toContain('about:blank');
+
+    // Cross-host OAuth redirect updates the displayed header host without changing source ref.
+    await ReactTestRenderer.act(async () => {
+      authWebViewBefore.props.onNavigationStateChange({
+        url: 'https://accounts.google.com/o/oauth2/auth',
+        canGoBack: true,
+      });
+    });
+
+    const authWebViewAfter = renderer.root.findAllByType(WebView)[1];
+    expect(authWebViewAfter.props.source).toBe(initialSourceRef);
+  } finally {
+    await ReactTestRenderer.act(async () => renderer.unmount());
+    AppState.currentState = prevAppState;
   }
 });

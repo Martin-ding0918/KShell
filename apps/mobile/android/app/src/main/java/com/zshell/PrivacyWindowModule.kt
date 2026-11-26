@@ -35,6 +35,7 @@ class PrivacyWindowModule(reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun setSensitiveContentVisible(sensitive: Boolean) {
+    MainActivity.updateSensitiveContentVisible(sensitive)
     val activity = reactApplicationContext.currentActivity
     if (activity is MainActivity) {
       activity.runOnUiThread { activity.setSensitiveContentVisible(sensitive) }

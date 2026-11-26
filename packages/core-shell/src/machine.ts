@@ -104,7 +104,11 @@ function sanitizeCredentials(raw: unknown): PairingCredentials | null {
 
 function parseMachineIdNumber(id: string): number {
   const m = /^m([1-9][0-9]*)$/.exec(id);
-  return m != null ? Number(m[1]) : 0;
+  if (m == null) {
+    return 0;
+  }
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) && n < Number.MAX_SAFE_INTEGER ? n : 0;
 }
 
 function defaultName(creds: PairingCredentials): string {  if (creds.kind === 'kimi') {
@@ -147,12 +151,16 @@ export class MachineRegistry {
         !this.acceptsCredentials(credentials) ||
         typeof raw.id !== 'string' ||
         raw.id.length === 0 ||
-        typeof raw.name !== 'string'
+        typeof raw.name !== 'string' ||
+        raw.name.trim().length === 0
       ) {
         continue;
       }
       const sortOrder =
-        typeof raw.sortOrder === 'number' && Number.isFinite(raw.sortOrder)
+        typeof raw.sortOrder === 'number' &&
+        Number.isSafeInteger(raw.sortOrder) &&
+        raw.sortOrder >= 0 &&
+        raw.sortOrder < Number.MAX_SAFE_INTEGER
           ? raw.sortOrder
           : ++maxSort;
       const loginState: MachineLoginState | undefined =
@@ -186,13 +194,17 @@ export class MachineRegistry {
       maxSort = Math.max(maxSort, sortOrder);
     }
     const rawNextId =
-      typeof data.nextId === 'number' && Number.isSafeInteger(data.nextId) && data.nextId >= 1
+      typeof data.nextId === 'number' &&
+      Number.isSafeInteger(data.nextId) &&
+      data.nextId >= 1 &&
+      data.nextId < Number.MAX_SAFE_INTEGER
         ? data.nextId
         : 1;
     const rawNextSort =
       typeof data.nextSortOrder === 'number' &&
       Number.isSafeInteger(data.nextSortOrder) &&
-      data.nextSortOrder >= 1
+      data.nextSortOrder >= 1 &&
+      data.nextSortOrder < Number.MAX_SAFE_INTEGER
         ? data.nextSortOrder
         : 1;
     this.data = {
@@ -391,11 +403,20 @@ export class MachineRegistry {
         credentials: sanitized,
         favorite: rec.favorite === true,
         sortOrder: this.data.nextSortOrder++,
-        createdAt: typeof rec.createdAt === 'number' ? rec.createdAt : this.now(),
+        createdAt:
+          typeof rec.createdAt === 'number' && Number.isFinite(rec.createdAt)
+            ? rec.createdAt
+            : this.now(),
         lastUsedAt: null,
         muted: rec.muted === true,
         ...(loginState != null
-          ? {loginState, loginAt: typeof rec.loginAt === 'number' ? rec.loginAt : null}
+          ? {
+              loginState,
+              loginAt:
+                typeof rec.loginAt === 'number' && Number.isFinite(rec.loginAt)
+                  ? rec.loginAt
+                  : null,
+            }
           : {}),
       });
       result.added++;

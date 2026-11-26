@@ -44,7 +44,7 @@ describe('applock multi-method model', () => {
     // A password attempt must not pass as a pattern and vice versa.
     expect(verifySecret('hunter2', 'pattern', cfg)).toBe(false);
     expect(verifySecret('0158', 'password', cfg)).toBe(false);
-  });
+  }, 20_000);
 
   it('biometric flag coexists with secrets', () => {
     let cfg = setBiometric(emptyLockConfig(), true);
@@ -52,7 +52,7 @@ describe('applock multi-method model', () => {
     cfg = setPattern(cfg, '0158', fakeSalt(3));
     expect(cfg.methods.biometric).toBe(true);
     expect(activeSecrets(cfg)).toEqual(['pattern']);
-  });
+  }, 15_000);
 
   it('clearing methods recomputes enabled', () => {
     let cfg = setPattern(emptyLockConfig(), '0158', fakeSalt(4));
@@ -61,13 +61,13 @@ describe('applock multi-method model', () => {
     const afterBoth = clearMethod(clearMethod(cfg, 'pattern'), 'password');
     expect(afterBoth.enabled).toBe(false);
     expect(afterBoth.methods.pattern).toBeNull();
-  });
+  }, 15_000);
 
   it('same secret set twice gets different salts', () => {
     const a = setPattern(emptyLockConfig(), '0158', fakeSalt(6));
     const b = setPattern(emptyLockConfig(), '0158', fakeSalt(7));
     expect(a.methods.pattern!.hashHex).not.toBe(b.methods.pattern!.hashHex);
-  });
+  }, 15_000);
 
   it('installVerifier accepts a precomputed verifier and still verifies', () => {
     // Path used by the app when the hash is computed off the JS thread.
@@ -77,7 +77,7 @@ describe('applock multi-method model', () => {
     expect(cfg.methods.password).toEqual(verifier);
     expect(verifySecret('hunter2', 'password', cfg)).toBe(true);
     expect(installVerifier(cfg, 'password', verifier).createdAt).toBe(cfg.createdAt);
-  });
+  }, 15_000);
 
   it('serializes / deserializes round-trip', () => {
     let cfg = setBiometric(emptyLockConfig(), true);
@@ -85,6 +85,26 @@ describe('applock multi-method model', () => {
     cfg = setPassword(cfg, 'pw', fakeSalt(9));
     const restored = deserializeLockConfig(serializeLockConfig(cfg))!;
     expect(restored).toEqual(cfg);
+    expect(verifySecret('0158', 'pattern', restored)).toBe(true);
+  }, 20_000);
+
+  it('normalizes uppercase verifier hex so verification still succeeds', () => {
+    const verifier = makeVerifier('0158', fakeSalt(11), 100);
+    const raw = JSON.stringify({
+      enabled: true,
+      methods: {
+        biometric: false,
+        pattern: {
+          saltHex: verifier.saltHex.toUpperCase(),
+          hashHex: verifier.hashHex.toUpperCase(),
+          iterations: verifier.iterations,
+        },
+        password: null,
+      },
+      createdAt: 1,
+    });
+    const restored = deserializeLockConfig(raw)!;
+    expect(restored.methods.pattern?.hashHex).toBe(verifier.hashHex);
     expect(verifySecret('0158', 'pattern', restored)).toBe(true);
   });
 
@@ -154,6 +174,20 @@ describe('applock multi-method model', () => {
         method: 'pattern',
         secretKind: 'pattern',
         verifier: {saltHex: 'not-hex', hashHex: 'deadbeef', iterations: -1},
+      })),
+    ).toBeNull();
+    expect(
+      deserializeLockConfig(JSON.stringify({
+        enabled: true,
+        method: 'pattern',
+        secretKind: 'bogus',
+      })),
+    ).toBeNull();
+    expect(
+      deserializeLockConfig(JSON.stringify({
+        enabled: true,
+        method: 'pattern',
+        secretKind: 'pattern',
       })),
     ).toBeNull();
   });

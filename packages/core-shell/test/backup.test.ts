@@ -126,7 +126,7 @@ describe('machine mute', () => {
     expect(reg.setMuted('m1', true)).toBe(true);
     expect(reg.get('m1')?.muted).toBe(true);
     const revived = MachineRegistry.fromJSON(JSON.stringify(reg.toJSON()));
-    expect(revived.get('m1')?.muted).toBe(true);
+    expect(revived?.get('m1')?.muted).toBe(true);
     expect(reg.setMuted('nope', true)).toBe(false);
   });
 });

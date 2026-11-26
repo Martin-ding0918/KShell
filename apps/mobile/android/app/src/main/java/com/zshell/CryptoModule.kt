@@ -69,62 +69,66 @@ class CryptoModule(reactContext: ReactApplicationContext) :
     }
     val iters = iterations.toInt()
     val outLen = dkLen.toInt()
-    kdfExecutor.execute {
-      var password: ByteArray? = null
-      var salt: ByteArray? = null
-      var keyBytes: ByteArray? = null
-      var out: ByteArray? = null
-      var result: ByteArray? = null
-      try {
-        password = Base64.decode(passwordB64, Base64.NO_WRAP)
-        salt = Base64.decode(saltB64, Base64.NO_WRAP)
-        // JCA SecretKeySpec rejects 0-length keys; in RFC 2104 HMAC-SHA256 an
-        // empty key is zero-padded to the 64-byte block size, identical to a
-        // single 0x00 byte key.
-        keyBytes = if (password.isEmpty()) ByteArray(1) else password.copyOf()
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(keyBytes, "HmacSHA256"))
-        val blocks = (outLen + 31) / 32
-        out = ByteArray(blocks * 32)
-        val saltBlock = ByteArray(salt.size + 4)
-        System.arraycopy(salt, 0, saltBlock, 0, salt.size)
+    try {
+      kdfExecutor.execute {
+        var password: ByteArray? = null
+        var salt: ByteArray? = null
+        var keyBytes: ByteArray? = null
+        var out: ByteArray? = null
+        var result: ByteArray? = null
         try {
-          for (i in 1..blocks) {
-            saltBlock[salt.size] = (i ushr 24).toByte()
-            saltBlock[salt.size + 1] = (i ushr 16).toByte()
-            saltBlock[salt.size + 2] = (i ushr 8).toByte()
-            saltBlock[salt.size + 3] = i.toByte()
-            var u = mac.doFinal(saltBlock)
-            val t = u.copyOf()
-            try {
-              for (iter in 1 until iters) {
-                val nextU = mac.doFinal(u)
-                u.fill(0)
-                u = nextU
-                for (j in t.indices) {
-                  t[j] = (t[j].toInt() xor u[j].toInt()).toByte()
+          password = Base64.decode(passwordB64, Base64.NO_WRAP)
+          salt = Base64.decode(saltB64, Base64.NO_WRAP)
+          // JCA SecretKeySpec rejects 0-length keys; in RFC 2104 HMAC-SHA256 an
+          // empty key is zero-padded to the 64-byte block size, identical to a
+          // single 0x00 byte key.
+          keyBytes = if (password.isEmpty()) ByteArray(1) else password.copyOf()
+          val mac = Mac.getInstance("HmacSHA256")
+          mac.init(SecretKeySpec(keyBytes, "HmacSHA256"))
+          val blocks = (outLen + 31) / 32
+          out = ByteArray(blocks * 32)
+          val saltBlock = ByteArray(salt.size + 4)
+          System.arraycopy(salt, 0, saltBlock, 0, salt.size)
+          try {
+            for (i in 1..blocks) {
+              saltBlock[salt.size] = (i ushr 24).toByte()
+              saltBlock[salt.size + 1] = (i ushr 16).toByte()
+              saltBlock[salt.size + 2] = (i ushr 8).toByte()
+              saltBlock[salt.size + 3] = i.toByte()
+              var u = mac.doFinal(saltBlock)
+              val t = u.copyOf()
+              try {
+                for (iter in 1 until iters) {
+                  val nextU = mac.doFinal(u)
+                  u.fill(0)
+                  u = nextU
+                  for (j in t.indices) {
+                    t[j] = (t[j].toInt() xor u[j].toInt()).toByte()
+                  }
                 }
+                System.arraycopy(t, 0, out, (i - 1) * 32, 32)
+              } finally {
+                u.fill(0)
+                t.fill(0)
               }
-              System.arraycopy(t, 0, out, (i - 1) * 32, 32)
-            } finally {
-              u.fill(0)
-              t.fill(0)
             }
+          } finally {
+            saltBlock.fill(0)
           }
+          result = if (outLen == out.size) out.copyOf() else out.copyOf(outLen)
+          promise.resolve(Base64.encodeToString(result, Base64.NO_WRAP))
+        } catch (e: Exception) {
+          promise.reject("PBKDF2", e.message ?: "密钥派生失败", e)
         } finally {
-          saltBlock.fill(0)
+          password?.fill(0)
+          salt?.fill(0)
+          keyBytes?.fill(0)
+          out?.fill(0)
+          result?.fill(0)
         }
-        result = if (outLen == out.size) out.copyOf() else out.copyOf(outLen)
-        promise.resolve(Base64.encodeToString(result, Base64.NO_WRAP))
-      } catch (e: Exception) {
-        promise.reject("PBKDF2", e.message ?: "密钥派生失败", e)
-      } finally {
-        password?.fill(0)
-        salt?.fill(0)
-        keyBytes?.fill(0)
-        out?.fill(0)
-        result?.fill(0)
       }
+    } catch (e: Exception) {
+      promise.reject("PBKDF2", e.message ?: "加密模块不可用", e)
     }
   }
 }

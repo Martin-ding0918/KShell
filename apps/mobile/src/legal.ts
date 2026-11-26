@@ -13,11 +13,11 @@ export interface LegalDoc {
 }
 
 /** Bump to re-prompt consent after material legal changes. */
-export const LEGAL_DOC_VERSION = 10;
+export const LEGAL_DOC_VERSION = 11;
 
 export const USER_AGREEMENT: LegalDoc = {
   title: '用户协议与免责声明',
-  body: `最后更新：2026-11-25 · 适用版本：KShell v0.0.1.28
+  body: `最后更新：2026-11-26 · 适用版本：KShell v0.0.2
 
 一、非官方声明
 KShell 是一个非官方、未经授权的开源第三方客户端，与 Kimi、Moonshot AI、ZCode、智谱及其关联公司不存在任何隶属、代理、合作、赞助或认可关系。“Kimi”“ZCode”及相关商标归其各自权利人所有，这些名称仅用于描述互操作对象。
@@ -46,7 +46,7 @@ KShell 是一个非官方、未经授权的开源第三方客户端，与 Kimi�
 
 export const PRIVACY_POLICY: LegalDoc = {
   title: '隐私政策',
-  body: `最后更新：2026-11-25 · 适用版本：KShell v0.0.1.28
+  body: `最后更新：2026-11-26 · 适用版本：KShell v0.0.2
 
 KShell 的隐私设计只有一条原则：零收集。本应用没有自建服务器、没有账号体系、没有崩溃收集 SDK、没有广告和分析组件。所有功能均在你本人的设备上完成。
 

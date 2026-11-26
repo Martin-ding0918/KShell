@@ -3,7 +3,13 @@ name: android
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -11,6 +17,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -37,10 +44,18 @@ jobs:
       - name: Install dependencies (workspaces + npm patches)
         run: npm install
 
-      - name: Verify gradle-plugin patch applied
+      - name: Verify npm patches applied
         run: |
           if grep -q "foojay-resolver-convention" node_modules/@react-native/gradle-plugin/settings.gradle.kts; then
-            echo "::error::npm patch did not apply — build would fail on Gradle 9"
+            echo "::error::gradle-plugin patch did not apply — build would fail on Gradle 9"
+            exit 1
+          fi
+          if ! grep -q "isKShellConsoleOrigin" node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java; then
+            echo "::error::react-native-webview patch did not apply"
+            exit 1
+          fi
+          if grep -qE "barcode-scanning|play-services-mlkit" node_modules/react-native-camera-kit/android/build.gradle || ! grep -q "com.google.zxing:core" node_modules/react-native-camera-kit/android/build.gradle; then
+            echo "::error::react-native-camera-kit ZXing patch did not apply cleanly"
             exit 1
           fi
 

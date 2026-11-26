@@ -1,5 +1,9 @@
 import {describe, expect, it} from 'vitest';
-import {ABORT_SIGNAL_PATCH_SOURCE, WS_OBSERVER_PATCH_SOURCE} from '../src/index';
+import {
+  ABORT_SIGNAL_PATCH_SOURCE,
+  PROMISE_WITHRESOLVERS_PATCH_SOURCE,
+  WS_OBSERVER_PATCH_SOURCE,
+} from '../src/index';
 
 type Listener = (ev: Record<string, unknown>) => void;
 
@@ -64,15 +68,20 @@ describe('WS_OBSERVER_PATCH_SOURCE', () => {
     primary.emit('open');
     secondary.emit('open');
     primary.emit('message', {data: JSON.stringify({pair_status: 'matched'})});
-    primary.emit('message', {data: JSON.stringify({type: 'permission_request'})});
+    primary.emit('message', {data: JSON.stringify({type: 'request', method: 'permission_request'})});
     primary.emit('message', {data: JSON.stringify({type: 'KICKED'})});
 
     expect(posted.map(e => e.type)).toContain('pair-status');
     expect(posted.map(e => e.type)).toContain('approval-waiting');
     expect(posted.map(e => e.type)).toContain('kicked');
 
-    // Secondary socket signals are also observed.
+    // Secondary socket signals are also observed, while an auxiliary open after
+    // primary is established must not overwrite primary status with ws-connected.
     posted.length = 0;
+    const aux = new WS('wss://code-rc.kimi.com/ws?role=aux');
+    aux.emit('open');
+    expect(posted).toEqual([]);
+
     secondary.emit('message', {data: JSON.stringify({type: 'KICKED'})});
     expect(posted.map(e => e.type)).toEqual(['kicked']);
   });
@@ -141,5 +150,27 @@ describe('ABORT_SIGNAL_PATCH_SOURCE', () => {
     expect(combined.aborted).toBe(true);
     expect(combined.reason).toBe('boom');
     expect(removed).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('PROMISE_WITHRESOLVERS_PATCH_SOURCE', () => {
+  it('constructs instances of subclass receivers and rejects non-constructors', async () => {
+    class BasePromise<T> extends Promise<T> {}
+    class SubPromise<T> extends BasePromise<T> {}
+    const win: Record<string, unknown> = {};
+    const run = new Function('window', 'Promise', PROMISE_WITHRESOLVERS_PATCH_SOURCE);
+    run(win, BasePromise);
+
+    const withResolvers = (BasePromise as unknown as {withResolvers: <T>() => {
+      promise: SubPromise<T>;
+      resolve: (v: T) => void;
+      reject: (e: unknown) => void;
+    }}).withResolvers;
+
+    const {promise, resolve} = withResolvers.call(SubPromise);
+    expect(promise).toBeInstanceOf(SubPromise);
+    resolve('ok');
+    await expect(promise).resolves.toBe('ok');
+    expect(() => withResolvers.call({})).toThrow(TypeError);
   });
 });

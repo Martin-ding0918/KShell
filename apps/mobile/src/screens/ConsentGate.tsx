@@ -10,6 +10,7 @@ import {makeStyles, radius} from '../theme';
 
 interface ConsentGateProps {
   onAgree: () => void;
+  visible?: boolean;
 }
 
 /**
@@ -17,7 +18,7 @@ interface ConsentGateProps {
  * accept the user agreement and privacy policy before entering the app.
  * Declining exits — nothing is collected or initialized before consent.
  */
-export function ConsentGate({onAgree}: ConsentGateProps) {
+export function ConsentGate({onAgree, visible = true}: ConsentGateProps) {
   const styles = useStyles();
   const [openDoc, setOpenDoc] = useState<LegalDoc | null>(null);
 
@@ -48,7 +49,7 @@ export function ConsentGate({onAgree}: ConsentGateProps) {
       <TouchableOpacity style={styles.declineButton} onPress={decline}>
         <Text style={styles.declineButtonText}>不同意并退出</Text>
       </TouchableOpacity>
-      <LegalDocModal doc={openDoc} onClose={() => setOpenDoc(null)} />
+      <LegalDocModal doc={visible ? openDoc : null} onClose={() => setOpenDoc(null)} />
     </View>
   );
 }

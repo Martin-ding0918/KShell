@@ -1,6 +1,6 @@
 # 隐私政策（Privacy Policy）
 
-最后更新：2026-11-25 · 适用版本：KShell v0.0.1.28
+最后更新：2026-11-26 · 适用版本：KShell v0.0.2
 
 KShell 的隐私设计只有一条原则：**零收集**。本软件没有自建服务器、没有账号体系、没有崩溃收集 SDK、没有广告和分析组件。你能看到的每一个功能都在你的设备上完成。
 
@@ -27,9 +27,9 @@ KShell 的隐私设计只有一条原则：**零收集**。本软件没有自建
 | 相机（CAMERA） | 扫描桌面端配对二维码 | 仅取景识别，不拍照、不录像、不保存任何图像 |
 | 生物识别（USE_BIOMETRIC） | 应用锁的指纹 / 人脸验证 | 仅调用系统本机验证，本软件不接触、不存储生物特征数据 |
 | 照片访问 | 「从相册选择二维码图片」功能 | 仅在你主动选图时读取所选单张图片，识别完成即丢弃，不访问相册其他内容 |
-| 网络（INTERNET） | 打开官方控制台与授权登录页、下载用户选取的文件、检查和下载 KShell 更新 | 控制台及登录仅使用官方 HTTPS 域名（`code-rc.kimi.com`、`code-rc.kimi.ai`、`auth.kimi.com`、`zcode.z.ai`、`zcode.chatglm.site` 等官方登录域），账号登录由官方页面处理。KShell 通过 GitHub Releases（`api.github.com` / `github.com`）检查并下载自身更新，可在设置关闭自动检查 |
+| 网络（INTERNET） | 打开官方控制台与授权登录页、下载用户选取的文件、检查和下载 KShell 更新 | 控制台及登录仅使用官方 HTTPS 域名（`code-rc.kimi.com`、`code-rc.kimi.ai`、`auth.kimi.com`、`auth.kimi.ai`、`zcode.z.ai`、`zcode.chatglm.site` 等官方登录域），账号登录由官方页面处理。KShell 通过 GitHub Releases（`api.github.com` / `github.com`）检查并下载自身更新，可在设置关闭自动检查 |
 | 通知（POST_NOTIFICATIONS） | 断线、会话被其他设备接管、等待批准、更新发现及下载暂停/超时取消提醒 | 由设备本机发出，可在设置中关闭或配置免打扰时段 |
-| 安装应用（REQUEST_INSTALL_PACKAGES） | 应用内更新 | 更新包下载完成后先校验包名、签名证书（及官方 SHA-256 摘要，如有），通过后交由系统安装器安装，是否安装始终由你确认 |
+| 安装应用（REQUEST_INSTALL_PACKAGES） | 应用内更新 | 更新包下载完成后先复制到应用私有缓存校验包名、签名证书（及官方 SHA-256 摘要，如有），通过后交由系统安装器安装，是否安装始终由你确认 |
 
 ## 4. 第三方组件
 
@@ -44,7 +44,7 @@ KShell 的隐私设计只有一条原则：**零收集**。本软件没有自建
 | react-native-biometrics | 系统生物识别 |
 | jsQR / jpeg-js / pako | 二维码图片识别（纯本地解码） |
 
-应用内更新包通过系统 DownloadManager 保存到应用专用目录。控制台内主动触发的文件下载通过系统 DownloadManager 写入公共下载目录，可在「下载管理」查看、打开与删除。公共下载文件由用户管理。应用内法律文本（v10）与本文件同步维护。
+应用内更新包通过系统 DownloadManager 保存到应用专用目录。控制台内主动触发的文件下载通过系统 DownloadManager 写入公共下载目录，可在「下载管理」查看、打开与删除。公共下载文件由用户管理。应用内法律文本（v11）与本文件同步维护。
 
 ### 本地附加数据
 

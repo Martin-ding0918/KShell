@@ -123,9 +123,15 @@ function httpsHostOf(url: string): string {
 
 const KIMI_CONSOLE_HOST_RE = /^code-rc\.kimi\.(?:com|ai)$/;
 const ZCODE_CONSOLE_HOST_RE = /^(?:zcode\.z\.ai|zcode\.chatglm\.site)$/;
-const KIMI_MAIN_NAV_HOST_RE = /^(?:(?:code-rc|auth|www)\.)?kimi\.(?:com|ai)$|^(?:[a-z0-9-]+\.)?moonshot\.cn$/;
-const ZCODE_MAIN_NAV_HOST_RE = /^(?:[a-z0-9-]+\.)?(?:z\.ai|chatglm\.site|chatglm\.cn|bigmodel\.cn|zhipuai\.cn)$/;
-const KIMI_AUTH_NAV_HOST_RE = /^(?:[a-z0-9-]+\.)?(?:kimi\.com|kimi\.ai|moonshot\.cn)$|^accounts\.google\.com$|^appleid\.apple\.com$|^open\.weixin\.qq\.com$/;
+const COMMON_OAUTH_HOST_RE =
+  /^(?:accounts\.google\.com|accounts\.youtube\.com|appleid\.apple\.com|idmsa\.apple\.com|open\.weixin\.qq\.com|github\.com|open\.feishu\.cn)$/;
+const KIMI_MAIN_NAV_HOST_RE =
+  /^(?:(?:code-rc|auth|www)\.)?kimi\.(?:com|ai)$|^(?:[a-z0-9-]+\.)?moonshot\.cn$/;
+const ZCODE_MAIN_NAV_HOST_RE =
+  /^(?:[a-z0-9-]+\.)?(?:z\.ai|chatglm\.site|chatglm\.cn|bigmodel\.cn|zhipuai\.cn)$|^(?:accounts\.google\.com|accounts\.youtube\.com|appleid\.apple\.com|idmsa\.apple\.com|open\.weixin\.qq\.com|github\.com|open\.feishu\.cn)$/;
+const KIMI_AUTH_NAV_HOST_RE =
+  /^(?:[a-z0-9-]+\.)?(?:kimi\.com|kimi\.ai|moonshot\.cn)$|^(?:accounts\.google\.com|accounts\.youtube\.com|appleid\.apple\.com|idmsa\.apple\.com|open\.weixin\.qq\.com)$/;
+const ZCODE_AUTH_NAV_HOST_RE = ZCODE_MAIN_NAV_HOST_RE;
 
 const MAX_RENDERER_AUTO_RECOVERIES = 2;
 const RENDERER_CRASH_WINDOW_MS = 60_000;
@@ -313,6 +319,11 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   // 壳里永远未登录。
   const [authWindowUrl, setAuthWindowUrl] = useState<string | null>(null);
   const [authCurrentHost, setAuthCurrentHost] = useState('');
+  const authWebSource = useMemo(
+    () => (authWindowUrl != null ? {uri: authWindowUrl} : null),
+    [authWindowUrl],
+  );
+  const authPatchSource = useMemo(() => buildPatchSource(), []);
   // The bridge handler is created once per machine; menu items reach the
   // latest reload through a ref so the callback identity stays stable.
   const reloadRef = useRef<(mode?: 'current-page') => void>(() => {});
@@ -500,13 +511,22 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       if (next === active) return;
       active = next;
       syncTopbarActivity(active);
-      if (!active) return;
+      if (!active) {
+        if (crashRecoverTimerRef.current != null) {
+          clearTimeout(crashRecoverTimerRef.current);
+          crashRecoverTimerRef.current = null;
+        }
+        return;
+      }
 
       if (fromAppState) logDiag('app-active', statusRef.current);
       if (rendererGone) {
         if (crashCountRef.current <= MAX_RENDERER_AUTO_RECOVERIES) {
           const delay = crashCountRef.current * 1500;
           logDiag('auto-reload');
+          if (crashRecoverTimerRef.current != null) {
+            clearTimeout(crashRecoverTimerRef.current);
+          }
           crashRecoverTimerRef.current = setTimeout(() => {
             crashRecoverTimerRef.current = null;
             reload(undefined, true);
@@ -552,15 +572,20 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     const target = event.nativeEvent.targetUrl;
     if (typeof target !== 'string' || !/^https:\/\//i.test(target)) return;
     const host = authHostOf(target);
-    if (!host) return;
+    const httpsHost = httpsHostOf(target);
+    if (!host || !httpsHost) return;
     logDiag('window-open', host);
-    if (isKimi && /^https:\/\/auth\.kimi\.com(?::443)?(?:[/?#]|$)/i.test(target)) {
+    const isKimiAuthPopup = isKimi && /^auth\.kimi\.(?:com|ai)$/.test(httpsHost);
+    const isZcodeAuthPopup =
+      isZcode &&
+      (ZCODE_AUTH_NAV_HOST_RE.test(httpsHost) || COMMON_OAUTH_HOST_RE.test(httpsHost));
+    if (isKimiAuthPopup || isZcodeAuthPopup) {
       setAuthWindowUrl(target);
       setAuthCurrentHost(host);
     } else {
       openInBrowser(target).catch(() => Alert.alert('无法打开浏览器'));
     }
-  }, [foreground, isKimi]);
+  }, [foreground, isKimi, isZcode]);
 
   const handleShouldStartMain = useCallback(
     (req: ShouldStartLoadRequest): boolean => {
@@ -571,6 +596,11 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         // Block non-HTTPS schemes (http:, file:, intent:, javascript:, data:).
         return false;
       }
+      if (req.isTopFrame === false) {
+        // Allow HTTPS subframes (e.g. login captcha widgets); native bridge
+        // strictly enforces isMainFrame + console origin allowlist.
+        return true;
+      }
       const allowed = isKimi
         ? KIMI_MAIN_NAV_HOST_RE.test(host)
         : isZcode
@@ -578,10 +608,6 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           : false;
       if (allowed) {
         return true;
-      }
-      if (req.isTopFrame === false) {
-        // Block untrusted third-party subframes inside the console WebView.
-        return false;
       }
       if (foreground && AppState.currentState === 'active') {
         openInBrowser(target).catch(() => Alert.alert('无法打开浏览器'));
@@ -599,18 +625,23 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       if (!host) {
         return false;
       }
-      if (KIMI_AUTH_NAV_HOST_RE.test(host)) {
+      if (req.isTopFrame === false) {
         return true;
       }
-      if (req.isTopFrame === false) {
-        return false;
+      const allowed = isKimi
+        ? KIMI_AUTH_NAV_HOST_RE.test(host)
+        : isZcode
+          ? ZCODE_AUTH_NAV_HOST_RE.test(host)
+          : false;
+      if (allowed) {
+        return true;
       }
       if (foreground && AppState.currentState === 'active') {
         openInBrowser(target).catch(() => Alert.alert('无法打开浏览器'));
       }
       return false;
     },
-    [foreground],
+    [foreground, isKimi, isZcode],
   );
 
   useEffect(() => {
@@ -674,7 +705,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         javaScriptEnabled
         domStorageEnabled
         cacheEnabled={false}
-        originWhitelist={['https://*']}
+        originWhitelist={['https://*', 'about:blank']}
         onShouldStartLoadWithRequest={handleShouldStartMain}
         style={styles.webview}
         containerStyle={styles.webview}
@@ -798,7 +829,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         </View>
       )}
 
-      {authWindowUrl != null && (
+      {authWindowUrl != null && authWebSource != null && (
         <View style={styles.authOverlay}>
           <View style={styles.authBar}>
             <View style={styles.authSide} />
@@ -817,12 +848,12 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
             </TouchableOpacity>
           </View>
           <WebView<object>
-            source={{uri: authWindowUrl}}
-            injectedJavaScriptBeforeContentLoaded={buildPatchSource()}
+            source={authWebSource}
+            injectedJavaScriptBeforeContentLoaded={authPatchSource}
             javaScriptEnabled
             domStorageEnabled
             cacheEnabled={false}
-            originWhitelist={['https://*']}
+            originWhitelist={['https://*', 'about:blank']}
             onShouldStartLoadWithRequest={handleShouldStartAuth}
             onNavigationStateChange={(nav: WebViewNavigation) => {
               const h = typeof nav.url === 'string' ? authHostOf(nav.url) : '';

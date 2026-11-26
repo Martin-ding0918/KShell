@@ -65,12 +65,12 @@ index 80c6803..b41f51d 100644
                webView,
                JAVASCRIPT_INTERFACE,
 -              Set.of("*"),
-+              Set.of(
++              new java.util.HashSet<>(java.util.Arrays.asList(
 +                "https://code-rc.kimi.com",
 +                "https://code-rc.kimi.ai",
 +                "https://zcode.z.ai",
 +                "https://zcode.chatglm.site"
-+              ),
++              )),
                this.bridgeListener
              );
            }
@@ -95,7 +95,7 @@ index 80c6803..b41f51d 100644
 +            onMessage("zshell:first-paint", getUrl());
 +        }
      }
-@@ -327,2 +334,42 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
+@@ -327,2 +334,44 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
      public void onMessage(String message, String sourceUrl) {
 +        if ("zshell:first-paint".equals(message) && isKShellConsoleOrigin(sourceUrl)
 +                && android.os.Build.VERSION.SDK_INT >= 23) {
@@ -131,6 +131,8 @@ index 80c6803..b41f51d 100644
 +        if (sourceUrl == null) return false;
 +        Uri origin = Uri.parse(sourceUrl);
 +        if (!"https".equals(origin.getScheme())) return false;
++        int port = origin.getPort();
++        if (port != -1 && port != 443) return false;
 +        String host = origin.getHost();
 +        return "code-rc.kimi.com".equals(host) || "code-rc.kimi.ai".equals(host)
 +                || "zcode.z.ai".equals(host) || "zcode.chatglm.site".equals(host);

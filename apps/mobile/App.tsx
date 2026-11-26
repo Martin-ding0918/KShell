@@ -127,14 +127,20 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
     return out;
   }, [consoleSessions, machines]);
 
+  const ensureRegistryLoaded = useCallback(() => {
+    if (registryRef.current == null) {
+      registryRef.current = loadRegistry();
+      setMachines(registryRef.current.sorted());
+    }
+  }, []);
+
   useEffect(() => {
     const cfg = loadLockConfig();
     setLock(cfg);
     const initiallyUnlocked = !cfg.enabled;
     setUnlocked(initiallyUnlocked);
     if (initiallyUnlocked) {
-      registryRef.current = loadRegistry();
-      setMachines(registryRef.current.sorted());
+      ensureRegistryLoaded();
     }
     const consent = loadLegalConsent();
     setConsented(consent != null && consent.version >= LEGAL_DOC_VERSION);
@@ -143,15 +149,14 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
     if (!loadPrefs().cacheWebLogin) {
       clearWebSession().catch(() => {});
     }
-  }, []);
+  }, [ensureRegistryLoaded]);
 
   // Load decrypted machine credentials only after the app lock is satisfied.
   useEffect(() => {
-    if (!booting && unlocked && registryRef.current == null) {
-      registryRef.current = loadRegistry();
-      setMachines(registryRef.current.sorted());
+    if (!booting && unlocked) {
+      ensureRegistryLoaded();
     }
-  }, [booting, unlocked]);
+  }, [booting, unlocked, ensureRegistryLoaded]);
 
   // Enforce FLAG_SECURE while LockScreen or backup/lock-secret flows are active
   // (even on API 36+ where recents masking normally allows screenshots).
@@ -481,11 +486,22 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
         ? base.machineId
         : null;
 
+  const barBg = consoleBarColor ?? colors.bg;
+  const barStyle = (() => {
+    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(barBg);
+    if (m == null) return isDark ? 'light-content' : 'dark-content';
+    const r = parseInt(m[1], 16) / 255;
+    const g = parseInt(m[2], 16) / 255;
+    const b = parseInt(m[3], 16) / 255;
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return luminance > 0.5 ? 'dark-content' : 'light-content';
+  })();
+
   return (
     <>
       <StatusBar
-        barStyle={isDark ? 'light-content' : 'dark-content'}
-        backgroundColor={consoleBarColor ?? colors.bg}
+        barStyle={barStyle}
+        backgroundColor={barBg}
         hidden={false}
       />
       <View style={{flex: 1}}>
@@ -524,6 +540,7 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
       {!consented ? (
         <View style={styles.gateOverlay}>
           <ConsentGate
+            visible={unlocked}
             onAgree={() => {
               saveLegalConsent({version: LEGAL_DOC_VERSION, agreedAt: Date.now()});
               setConsented(true);
@@ -533,7 +550,13 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
       ) : null}
       {!unlocked ? (
         <View style={styles.gateOverlay}>
-          <LockScreen config={lock} onUnlock={() => setUnlocked(true)} />
+          <LockScreen
+            config={lock}
+            onUnlock={() => {
+              ensureRegistryLoaded();
+              setUnlocked(true);
+            }}
+          />
         </View>
       ) : null}
     </>

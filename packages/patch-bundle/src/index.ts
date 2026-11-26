@@ -101,8 +101,9 @@ export const WS_OBSERVER_PATCH_SOURCE = String.raw`(function () {
       return null;
     }
     function isApprovalObj(o) {
-      var v = o.type || o.method || o.event;
-      return v === 'permission_request' || v === 'elicitation_request';
+      return o.type === 'permission_request' || o.type === 'elicitation_request' ||
+        o.method === 'permission_request' || o.method === 'elicitation_request' ||
+        o.event === 'permission_request' || o.event === 'elicitation_request';
     }
     // Signals must come from structured protocol fields in JSON object frames,
     // never from chat text or arbitrary JSON arrays. Returns true when a
@@ -160,23 +161,30 @@ export const WS_OBSERVER_PATCH_SOURCE = String.raw`(function () {
         }
         ws.addEventListener('open', function () {
           addOpen(ws);
-          post('ws-connected', {});
+          if (primaryWs === null || primaryWs === ws) {
+            post('ws-connected', {});
+          }
         });
         ws.addEventListener('close', function (ev) {
           removeOpen(ws);
           var wasPrimary = (primaryWs === ws);
           if (wasPrimary) { primaryWs = null; }
-          if (wasPrimary || openSockets.length === 0) {
+          if ((wasPrimary && openSockets.length === 0) ||
+              (wasPrimary && openSockets.length > 0 && !ws.__zshellSuperseded) ||
+              (!wasPrimary && primaryWs === null && openSockets.length === 0)) {
             post('ws-closed', { code: ev.code });
           }
         });
         ws.addEventListener('error', function () {
-          if (primaryWs === ws || openSockets.length === 0) {
+          if (primaryWs === ws || (primaryWs === null && openSockets.length === 0)) {
             post('ws-error', {});
           }
         });
         ws.addEventListener('message', function (ev) {
           if (signalFromMessage(ev.data)) {
+            if (primaryWs !== null && primaryWs !== ws) {
+              primaryWs.__zshellSuperseded = true;
+            }
             primaryWs = ws;
           }
         });
@@ -191,7 +199,7 @@ export const WS_OBSERVER_PATCH_SOURCE = String.raw`(function () {
       WrappedWS.CLOSED = NativeWS.CLOSED;
     } catch (e) { /* constants are best-effort */ }
     window.WebSocket = WrappedWS;
-    window[FLAG] = 'ws-observer:v4';
+    window[FLAG] = 'ws-observer:v5';
     window.addEventListener('online', function () { post('network-online', {}); });
     window.addEventListener('offline', function () { post('network-offline', {}); });
   } catch (e) { /* patches must never break the page */ }
@@ -274,14 +282,18 @@ export const PROMISE_WITHRESOLVERS_PATCH_SOURCE = String.raw`(function () {
     if (typeof window === 'undefined' || typeof Promise === 'undefined') { return; }
     if (typeof Promise.withResolvers === 'function' || window[FLAG]) { return; }
     Promise.withResolvers = function () {
+      if (typeof this !== 'function') {
+        throw new TypeError('Promise.withResolvers called on non-constructor');
+      }
+      var Ctor = this;
       var out = {};
-      out.promise = new Promise(function (resolve, reject) {
+      out.promise = new Ctor(function (resolve, reject) {
         out.resolve = resolve;
         out.reject = reject;
       });
       return out;
     };
-    window[FLAG] = 'promise-withresolvers:v1';
+    window[FLAG] = 'promise-withresolvers:v2';
   } catch (e) { /* patches must never break the page */ }
 })();`;
 

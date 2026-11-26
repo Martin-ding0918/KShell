@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {
+  AppState,
   Clipboard,
   Linking,
   Modal,
@@ -161,7 +162,19 @@ export function SettingsScreen({
   const [now, setNow] = useState(Date.now);
   const [verifying, setVerifying] = useState(false);
   const verifyInFlight = useRef(false);
+  const biometricInFlight = useRef(false);
+  const mountedRef = useRef(true);
+  const unlockedRef = useRef(unlocked);
+  unlockedRef.current = unlocked;
   const verifyRemaining = Math.max(0, Math.ceil((attempts.retryAt - now) / 1000));
+  const verifyCoolingDown = verifyRemaining > 0;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -172,10 +185,10 @@ export function SettingsScreen({
   }, [visible]);
 
   useEffect(() => {
-    if (verifyRemaining <= 0) return;
+    if (!verifyCoolingDown) return;
     const timer = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(timer);
-  }, [verifyRemaining]);
+  }, [verifyCoolingDown]);
 
   // Wipe sensitive in-memory state and dismiss all modals as soon as the app locks.
   useEffect(() => {
@@ -347,9 +360,14 @@ export function SettingsScreen({
     });
     try {
       const blob = await encryptBackupAsync(payload, backupPass, await secureRandomBytes(16));
+      if (!mountedRef.current || !unlockedRef.current) {
+        return;
+      }
       setBackupBlob(blob);
     } catch {
-      setError('备份失败：无法生成加密数据，请重试');
+      if (mountedRef.current && unlockedRef.current) {
+        setError('备份失败：无法生成加密数据，请重试');
+      }
       return;
     }
     setBackupPass('');
@@ -363,7 +381,12 @@ export function SettingsScreen({
     try {
       json = await decryptBackupAsync(restoreBlob.trim(), restorePass);
     } catch {
-      setError('解密失败：口令不对，或备份内容损坏');
+      if (mountedRef.current && unlockedRef.current) {
+        setError('解密失败：口令不对，或备份内容损坏');
+      }
+      return;
+    }
+    if (!mountedRef.current || !unlockedRef.current) {
       return;
     }
     if (json == null) {
@@ -536,11 +559,26 @@ export function SettingsScreen({
             onValueChange={async on => {
               setError(null);
               const enableBiometric = async () => {
-                const ok = await biometricAuth.prompt('验证通过后开启生物识别');
-                if (ok) {
-                  onSaveLock(setBiometric(lock, true));
-                } else {
-                  setError('验证未通过，未开启生物识别');
+                if (biometricInFlight.current) {
+                  return;
+                }
+                biometricInFlight.current = true;
+                try {
+                  const ok = await biometricAuth.prompt('验证通过后开启生物识别');
+                  if (!mountedRef.current || !unlockedRef.current) {
+                    return;
+                  }
+                  if (ok && AppState.currentState === 'active') {
+                    onSaveLock(setBiometric(lock, true));
+                  } else if (!ok) {
+                    setError('验证未通过，未开启生物识别');
+                  }
+                } catch {
+                  if (mountedRef.current && unlockedRef.current) {
+                    setError('验证暂不可用，请重试');
+                  }
+                } finally {
+                  biometricInFlight.current = false;
                 }
               };
               if (!on) {
@@ -551,9 +589,7 @@ export function SettingsScreen({
               }
               if (lock.enabled) {
                 requestVerify(`开启${biometricLabel(biometricType)}`, () => {
-                  enableBiometric().catch(() =>
-                    setError('验证暂不可用，请重试'),
-                  );
+                  void enableBiometric();
                 });
                 return;
               }
@@ -704,16 +740,32 @@ export function SettingsScreen({
               <TouchableOpacity
                 style={styles.primaryButton}
                 onPress={async () => {
-                  const ok = await biometricAuth.prompt('验证以继续');
-                  if (ok) {
-                    clearLockAttempts();
-                    setAttempts({failures: 0, retryAt: 0});
-                    const nextAction = step.action;
-                    setStep({kind: 'idle'});
-                    setError(null);
-                    nextAction();
-                  } else {
-                    setError('验证未通过');
+                  if (biometricInFlight.current) {
+                    return;
+                  }
+                  biometricInFlight.current = true;
+                  setError(null);
+                  try {
+                    const ok = await biometricAuth.prompt('验证以继续');
+                    if (!mountedRef.current || !unlockedRef.current) {
+                      return;
+                    }
+                    if (ok && AppState.currentState === 'active') {
+                      clearLockAttempts();
+                      setAttempts({failures: 0, retryAt: 0});
+                      const nextAction = step.action;
+                      setStep({kind: 'idle'});
+                      setError(null);
+                      nextAction();
+                    } else if (!ok) {
+                      setError('验证未通过');
+                    }
+                  } catch {
+                    if (mountedRef.current && unlockedRef.current) {
+                      setError('生物识别暂不可用，请使用备用方式');
+                    }
+                  } finally {
+                    biometricInFlight.current = false;
                   }
                 }}>
                 <Text style={styles.primaryButtonText}>

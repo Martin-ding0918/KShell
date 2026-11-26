@@ -190,7 +190,7 @@ export function verifySecret(
     verifier.iterations,
     32,
   );
-  return constantTimeEqual(bytesToHex(hash), verifier.hashHex);
+  return constantTimeEqual(bytesToHex(hash), verifier.hashHex.toLowerCase());
 }
 
 export function serializeLockConfig(config: LockConfig): string {
@@ -200,9 +200,12 @@ export function serializeLockConfig(config: LockConfig): string {
 /** Migrate a v1 (single-method) config into the multi-method shape. */
 function migrateV1(parsed: Record<string, unknown>): LockConfig | null {
   const method = parsed.method as string | undefined;
-  const secretKind = parsed.secretKind as SecretKind | undefined;
+  const secretKind = parsed.secretKind as unknown;
   const verifier = parsed.verifier;
   if (method !== 'biometric' && secretKind == null) {
+    return null;
+  }
+  if (secretKind != null && secretKind !== 'pattern' && secretKind !== 'password') {
     return null;
   }
   const methods: LockMethods = {
@@ -211,13 +214,17 @@ function migrateV1(parsed: Record<string, unknown>): LockConfig | null {
     password: null,
   };
   if (secretKind === 'pattern' || secretKind === 'password') {
-    if (verifier != null) {
+    if (verifier == null) {
+      if (method !== 'biometric') {
+        return null;
+      }
+    } else {
       if (!isValidVerifier(verifier)) {
         return null;
       }
       methods[secretKind] = {
-        saltHex: verifier.saltHex,
-        hashHex: verifier.hashHex,
+        saltHex: verifier.saltHex.toLowerCase(),
+        hashHex: verifier.hashHex.toLowerCase(),
         iterations: verifier.iterations,
       };
     }
@@ -260,16 +267,16 @@ export function deserializeLockConfig(raw: string | null): LockConfig | null {
       pattern:
         rawMethods.pattern != null
           ? {
-              saltHex: rawMethods.pattern.saltHex,
-              hashHex: rawMethods.pattern.hashHex,
+              saltHex: rawMethods.pattern.saltHex.toLowerCase(),
+              hashHex: rawMethods.pattern.hashHex.toLowerCase(),
               iterations: rawMethods.pattern.iterations,
             }
           : null,
       password:
         rawMethods.password != null
           ? {
-              saltHex: rawMethods.password.saltHex,
-              hashHex: rawMethods.password.hashHex,
+              saltHex: rawMethods.password.saltHex.toLowerCase(),
+              hashHex: rawMethods.password.hashHex.toLowerCase(),
               iterations: rawMethods.password.iterations,
             }
           : null,
