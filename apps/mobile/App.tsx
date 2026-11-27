@@ -13,6 +13,7 @@ import {
   MachineRecord,
   MachineRegistry,
 } from '@zshell/core-shell';
+import {AnimatedScreen} from './src/components/AnimatedScreen';
 import {ConsoleScreen} from './src/screens/ConsoleScreen';
 import {ConsentGate} from './src/screens/ConsentGate';
 import {DataManageScreen} from './src/screens/DataManageScreen';
@@ -329,6 +330,8 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
   const renderMachineList = () => (
     <MachineListScreen
       machines={machines}
+      activeSessionIds={consoleSessions}
+      unlocked={unlocked}
       onConnect={connectTo}
       onScan={() => push({name: 'scan'})}
       onManual={() => push({name: 'manual'})}
@@ -393,76 +396,84 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
   switch (base.name) {
     case 'scan':
       screen = (
-        <ScanScreen
-          onResult={url => {
-            const r = addFromUrl(url);
-            return {
-              ok: r.ok,
-              machineId: r.ok ? r.record.id : undefined,
-              reason: r.ok ? undefined : r.reason,
-            };
-          }}
-          onDone={outcome => {
-            if (outcome.ok && outcome.machineId != null) {
-              connectTo(outcome.machineId);
-            }
-          }}
-        />
+        <AnimatedScreen key="scan">
+          <ScanScreen
+            onBack={pop}
+            onResult={url => {
+              const r = addFromUrl(url);
+              return {
+                ok: r.ok,
+                machineId: r.ok ? r.record.id : undefined,
+                reason: r.ok ? undefined : r.reason,
+              };
+            }}
+            onDone={outcome => {
+              if (outcome.ok && outcome.machineId != null) {
+                connectTo(outcome.machineId);
+              }
+            }}
+          />
+        </AnimatedScreen>
       );
       break;
     case 'manual':
       screen = (
-        <ManualInputScreen
-          onSubmit={(url, name) => {
-            const r = addFromUrl(url, name);
-            return {
-              ok: r.ok,
-              machineId: r.ok ? r.record.id : undefined,
-              reason: r.ok ? undefined : r.reason,
-            };
-          }}
-          onDone={outcome => {
-            if (outcome.ok && outcome.machineId != null) {
-              connectTo(outcome.machineId);
-            }
-          }}
-        />
+        <AnimatedScreen key="manual">
+          <ManualInputScreen
+            onBack={pop}
+            onSubmit={(url, name) => {
+              const r = addFromUrl(url, name);
+              return {
+                ok: r.ok,
+                machineId: r.ok ? r.record.id : undefined,
+                reason: r.ok ? undefined : r.reason,
+              };
+            }}
+            onDone={outcome => {
+              if (outcome.ok && outcome.machineId != null) {
+                connectTo(outcome.machineId);
+              }
+            }}
+          />
+        </AnimatedScreen>
       );
       break;
     case 'settings':
       screen = (
-        <SettingsScreen
-          visible={!fromSettings && consented && unlocked}
-          unlocked={unlocked}
-          lock={lock}
-          onSaveLock={(cfg: LockConfig) => {
-            saveLockConfig(cfg);
-            setLock(cfg);
-          }}
-          machines={machines}
-          onImportMachines={records => {
-            const registry = registryRef.current!;
-            const result = registry.importMachines(records);
-            persist();
-            return result;
-          }}
-          onSignOutWebLogin={signOutWebLogin}
-          onSensitiveChange={setSettingsSensitive}
-          onBack={pop}
-          onOpenPermissions={() => push({name: 'permissions'})}
-          onOpenDownloads={() => push({name: 'downloads'})}
-          onOpenDataManage={() => push({name: 'datamanage'})}
-          onOpenDiagnostics={() => push({name: 'diagnostics'})}
-          themeMode={themeMode}
-          onChangeThemeMode={onChangeThemeMode}
-        />
+        <AnimatedScreen key="settings">
+          <SettingsScreen
+            visible={!fromSettings && consented && unlocked}
+            unlocked={unlocked}
+            lock={lock}
+            onSaveLock={(cfg: LockConfig) => {
+              saveLockConfig(cfg);
+              setLock(cfg);
+            }}
+            machines={machines}
+            onImportMachines={records => {
+              const registry = registryRef.current!;
+              const result = registry.importMachines(records);
+              persist();
+              return result;
+            }}
+            onSignOutWebLogin={signOutWebLogin}
+            onSensitiveChange={setSettingsSensitive}
+            onBack={pop}
+            onOpenPermissions={() => push({name: 'permissions'})}
+            onOpenDownloads={() => push({name: 'downloads'})}
+            onOpenDataManage={() => push({name: 'datamanage'})}
+            onOpenDiagnostics={() => push({name: 'diagnostics'})}
+            themeMode={themeMode}
+            onChangeThemeMode={onChangeThemeMode}
+          />
+        </AnimatedScreen>
       );
       break;
     case 'permissions':
     case 'downloads':
     case 'datamanage':
     case 'diagnostics':
-      screen = renderSubScreen(base);
+      screen = <AnimatedScreen key={base.name}>{renderSubScreen(base)}</AnimatedScreen>;
       break;
     case 'console': {
       // The console itself renders from the keep-alive session layer below;
@@ -533,7 +544,9 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
         {screen}
         {overlayScreen != null ? (
           <View style={styles.overlay}>
-            {renderSubScreen(overlayScreen)}
+            <AnimatedScreen key={overlayScreen.name}>
+              {renderSubScreen(overlayScreen)}
+            </AnimatedScreen>
           </View>
         ) : null}
       </View>

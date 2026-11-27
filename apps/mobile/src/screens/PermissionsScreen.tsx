@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import {parseClock} from '@zshell/core-shell';
 import {notifications, AppPrefs, loadPrefs, savePrefs} from '../notifications';
+import {PageHeader} from '../components/PageHeader';
 import {biometricLabel} from './LockScreen';
 import {makeStyles, radius, useTheme} from '../theme';
 
@@ -94,11 +95,9 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
     granted == null ? '检查中…' : granted ? '已授权' : blocked ? '已拒绝，需到系统设置开启' : '未授权';
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={{padding: 16, gap: 14}}>
-      <TouchableOpacity onPress={onBack} style={{paddingVertical: 4}}>
-        <Text style={{color: colors.accent, fontSize: 16}}>‹ 返回设置</Text>
-      </TouchableOpacity>
-      <Text style={styles.pageTitle}>权限与通知</Text>
+    <View style={styles.root}>
+      <PageHeader title="权限与通知" onBack={onBack} backLabel="返回设置" />
+      <ScrollView style={styles.scroll} contentContainerStyle={{padding: 16, gap: 14}}>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>通知</Text>
@@ -253,13 +252,14 @@ export function PermissionsScreen({onBack}: PermissionsScreenProps) {
           相册选图由系统选择器完成，无需相册权限。
         </Text>
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
-const useStyles = makeStyles((colors, font) => ({
+const useStyles = makeStyles(colors => ({
   root: {flex: 1, backgroundColor: colors.bg},
-  pageTitle: {...font.title, marginBottom: 2},
+  scroll: {flex: 1},
   card: {
     backgroundColor: colors.bgElevated,
     borderRadius: radius.l,

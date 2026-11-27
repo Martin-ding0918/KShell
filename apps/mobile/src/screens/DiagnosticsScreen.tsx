@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import {DiagEvent} from '@zshell/core-shell';
+import {PageHeader} from '../components/PageHeader';
 import {clearDiag, diag} from '../diagnostics';
 import {makeStyles, radius, useTheme} from '../theme';
 
@@ -62,11 +63,9 @@ export function DiagnosticsScreen({onBack}: {onBack: () => void}) {
   };
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={{padding: 16, gap: 14}}>
-      <TouchableOpacity onPress={onBack} style={{paddingVertical: 4}}>
-        <Text style={{color: colors.accent, fontSize: 16}}>‹ 返回设置</Text>
-      </TouchableOpacity>
-      <Text style={styles.pageTitle}>连接诊断</Text>
+    <View style={styles.root}>
+      <PageHeader title="连接诊断" onBack={onBack} backLabel="返回设置" />
+      <ScrollView style={styles.scroll} contentContainerStyle={{padding: 16, gap: 14}}>
       <Text style={font.faint}>
         最近 200 条连接相关事件，只存在本机。反馈问题时可复制，里面没有配对凭据
       </Text>
@@ -104,13 +103,14 @@ export function DiagnosticsScreen({onBack}: {onBack: () => void}) {
           ))}
         </View>
       )}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const useStyles = makeStyles((colors, font) => ({
   root: {flex: 1, backgroundColor: colors.bg},
-  pageTitle: {...font.title, marginBottom: 2},
+  scroll: {flex: 1},
   card: {
     backgroundColor: colors.bgElevated,
     borderRadius: radius.l,

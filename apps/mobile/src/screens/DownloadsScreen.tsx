@@ -18,6 +18,7 @@ import {
   resumeDownload,
   retryDownload,
 } from '../downloads';
+import {PageHeader} from '../components/PageHeader';
 import {makeStyles, radius, useTheme} from '../theme';
 
 /** Second-level page: every download this app uid owns — update APKs and
@@ -103,11 +104,9 @@ export function DownloadsScreen({
   };
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={{padding: 16, gap: 14}}>
-      <TouchableOpacity onPress={onBack} style={{paddingVertical: 4}}>
-        <Text style={{color: colors.accent, fontSize: 16}}>‹ {backLabel}</Text>
-      </TouchableOpacity>
-      <Text style={styles.pageTitle}>下载管理</Text>
+    <View style={styles.root}>
+      <PageHeader title="下载管理" onBack={onBack} backLabel={backLabel} />
+      <ScrollView style={styles.scroll} contentContainerStyle={{padding: 16, gap: 14}}>
       <Text style={font.faint}>
         更新包保存在应用专属目录，控制台下载保存到系统公共「下载」目录。
         暂停的控制台下载由系统自动续传；如失败，请回到网页重新下载。
@@ -222,13 +221,14 @@ export function DownloadsScreen({
           </View>
         );
       })}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const useStyles = makeStyles((colors, font) => ({
   root: {flex: 1, backgroundColor: colors.bg},
-  pageTitle: {...font.title, marginBottom: 2},
+  scroll: {flex: 1},
   card: {
     backgroundColor: colors.bgElevated,
     borderRadius: radius.l,

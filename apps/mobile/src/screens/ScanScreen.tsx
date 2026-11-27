@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {
+  Animated,
   PermissionsAndroid,
   StyleSheet,
   Text,
@@ -7,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import {Camera} from 'react-native-camera-kit';
+import {Icon} from '../components/Icon';
 import {makeStyles, radius, useTheme} from '../theme';
 import {pickAndDecodeQr} from '../qrFromFile';
 
@@ -18,6 +20,7 @@ export interface ScanOutcome {
 }
 
 interface ScanScreenProps {
+  onBack?: () => void;
   onResult: (url: string) => ScanOutcome;
   onDone: (outcome: ScanOutcome) => void;
 }
@@ -31,14 +34,17 @@ const REASON_TEXT: Record<string, string> = {
   'invalid-device-path': '不是有效的 Kimi Code 设备链接（/devices/…）',
 };
 
-export function ScanScreen({onResult, onDone}: ScanScreenProps) {
+const FRAME_SIZE = 244;
+
+export function ScanScreen({onBack, onResult, onDone}: ScanScreenProps) {
   const [permission, setPermission] = useState<'unknown' | 'granted' | 'denied'>(
     'unknown',
   );
-  const {font} = useTheme();
+  const {colors, font} = useTheme();
   const styles = useStyles();
   const [status, setStatus] = useState<{text: string; error: boolean} | null>(null);
   const handling = useRef(false);
+  const scanLineY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA).then(
@@ -47,6 +53,27 @@ export function ScanScreen({onResult, onDone}: ScanScreenProps) {
       },
     );
   }, []);
+
+  useEffect(() => {
+    if (permission !== 'granted') return;
+    scanLineY.setValue(0);
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scanLineY, {
+          toValue: FRAME_SIZE - 16,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scanLineY, {
+          toValue: 0,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [permission, scanLineY]);
 
   const handleUrl = (url: string) => {
     if (handling.current) {
@@ -106,18 +133,65 @@ export function ScanScreen({onResult, onDone}: ScanScreenProps) {
         </View>
       )}
 
+      {/* Translucent viewfinder mask + rounded blue corner brackets */}
+      {permission === 'granted' ? (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <View style={styles.maskTop} />
+          <View style={styles.maskMiddle}>
+            <View style={styles.maskSide} />
+            <View style={styles.viewfinder}>
+              <View style={[styles.corner, styles.cornerTL]} />
+              <View style={[styles.corner, styles.cornerTR]} />
+              <View style={[styles.corner, styles.cornerBL]} />
+              <View style={[styles.corner, styles.cornerBR]} />
+              <Animated.View
+                style={[styles.scanLine, {transform: [{translateY: scanLineY}]}]}
+              />
+            </View>
+            <View style={styles.maskSide} />
+          </View>
+          <View style={styles.maskBottom} />
+        </View>
+      ) : null}
+
+      <View style={styles.topBar}>
+        <View style={styles.topSide}>
+          {onBack != null ? (
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={onBack}
+              accessibilityLabel="返回"
+              accessibilityRole="button">
+              <Icon name="arrow-left" size={20} color={colors.overlayLightText} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <Text
+          style={[
+            styles.topTitle,
+            permission !== 'granted' && {color: colors.text},
+          ]}>
+          扫码配对
+        </Text>
+        <View style={styles.topSide} />
+      </View>
+
       <View style={styles.bottom}>
         {status != null ? (
-          <View style={styles.statusBox}>
-            <Text style={[styles.statusText, status.error && styles.errorText]}>{status.text}</Text>
+          <View style={styles.tipPill}>
+            <Text style={[styles.tipText, status.error && styles.errorText]}>
+              {status.text}
+            </Text>
           </View>
         ) : (
-          <Text style={styles.tip}>
-            对准桌面端「远程控制」二维码（Kimi Code / ZCode），{'\n'}
-            或从相册选择二维码图片
-          </Text>
+          <View style={styles.tipPill}>
+            <Text style={styles.tipText}>
+              对准桌面端「远程控制」二维码{'\n'}（Kimi Code / ZCode）
+            </Text>
+          </View>
         )}
-        <TouchableOpacity style={styles.albumButton} onPress={pickFile}>
+        <TouchableOpacity style={styles.albumButton} activeOpacity={0.85} onPress={pickFile}>
+          <Icon name="image" size={18} color={colors.onAccent} />
           <Text style={styles.albumButtonText}>从相册选择二维码图片</Text>
         </TouchableOpacity>
       </View>
@@ -134,29 +208,116 @@ const useStyles = makeStyles(colors => ({
     padding: 32,
     backgroundColor: colors.bg,
   },
-  bottom: {
+  topBar: {
     position: 'absolute',
+    top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
-    padding: 20,
-    paddingBottom: 34,
+    height: 64,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
   },
-  tip: {color: colors.text, backgroundColor: colors.bgElevatedOverlay, fontSize: 13, textAlign: 'center'},
-  statusBox: {
-    backgroundColor: colors.bgElevated,
-    borderRadius: radius.m,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+  topSide: {width: 44, alignItems: 'flex-start', justifyContent: 'center'},
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.overlaySurface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  statusText: {color: colors.text, fontSize: 13},
+  topTitle: {
+    flex: 1,
+    textAlign: 'center',
+    color: colors.overlayLightText,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  maskTop: {flex: 1, backgroundColor: colors.overlayDark},
+  maskMiddle: {flexDirection: 'row', height: FRAME_SIZE},
+  maskSide: {flex: 1, backgroundColor: colors.overlayDark},
+  maskBottom: {flex: 1.25, backgroundColor: colors.overlayDark},
+  viewfinder: {
+    width: FRAME_SIZE,
+    height: FRAME_SIZE,
+    position: 'relative',
+  },
+  corner: {
+    position: 'absolute',
+    width: 28,
+    height: 28,
+    borderColor: colors.accent,
+  },
+  cornerTL: {
+    top: -2,
+    left: -2,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+    borderTopLeftRadius: 14,
+  },
+  cornerTR: {
+    top: -2,
+    right: -2,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+    borderTopRightRadius: 14,
+  },
+  cornerBL: {
+    bottom: -2,
+    left: -2,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+    borderBottomLeftRadius: 14,
+  },
+  cornerBR: {
+    bottom: -2,
+    right: -2,
+    borderBottomWidth: 4,
+    borderRightWidth: 4,
+    borderBottomRightRadius: 14,
+  },
+  scanLine: {
+    position: 'absolute',
+    top: 8,
+    left: 14,
+    right: 14,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: colors.accent,
+    opacity: 0.85,
+  },
+  bottom: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 28,
+    alignItems: 'center',
+    gap: 14,
+  },
+  tipPill: {
+    backgroundColor: colors.overlaySurface,
+    borderRadius: radius.xl,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    maxWidth: '100%',
+  },
+  tipText: {
+    color: colors.overlayLightText,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+  },
   errorText: {color: colors.danger},
   albumButton: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     backgroundColor: colors.accent,
-    borderRadius: radius.m,
-    paddingVertical: 13,
+    borderRadius: radius.s,
+    paddingVertical: 14,
     paddingHorizontal: 24,
   },
   albumButtonText: {color: colors.onAccent, fontSize: 15, fontWeight: '600'},

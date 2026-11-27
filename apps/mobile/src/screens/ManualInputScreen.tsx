@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {PageHeader} from '../components/PageHeader';
 import {makeStyles, radius, useTheme} from '../theme';
 
 export interface ManualSubmitOutcome {
@@ -18,6 +19,7 @@ export interface ManualSubmitOutcome {
 }
 
 interface ManualInputScreenProps {
+  onBack?: () => void;
   onSubmit: (url: string, customName: string) => ManualSubmitOutcome;
   onDone: (outcome: ManualSubmitOutcome) => void;
 }
@@ -31,7 +33,7 @@ const REASON_TEXT: Record<string, string> = {
   'invalid-device-path': '不是有效的 Kimi Code 设备链接（/devices/…）',
 };
 
-export function ManualInputScreen({onSubmit, onDone}: ManualInputScreenProps) {
+export function ManualInputScreen({onBack, onSubmit, onDone}: ManualInputScreenProps) {
   const {colors, font} = useTheme();
   const styles = useStyles();
   const [url, setUrl] = useState('');
@@ -51,42 +53,52 @@ export function ManualInputScreen({onSubmit, onDone}: ManualInputScreenProps) {
     <KeyboardAvoidingView
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={font.dim}>
-          粘贴桌面端「远程控制」生成的配对链接（与二维码内容相同），
-          {'\n'}支持 Kimi Code 与 ZCode：
-        </Text>
-        <TextInput
-          style={styles.urlInput}
-          placeholder={'https://code-rc.kimi.com/devices/<设备ID>/'}
-          placeholderTextColor={colors.textFaint}
-          value={url}
-          onChangeText={setUrl}
-          multiline
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-        />
-        <TextInput
-          style={styles.nameInput}
-          placeholder="自定义名称（可选，如：公司电脑）"
-          placeholderTextColor={colors.textFaint}
-          value={name}
-          onChangeText={setName}
-          autoCapitalize="none"
-        />
-        {error != null ? <Text style={styles.error}>{error}</Text> : null}
-        <TouchableOpacity
-          style={[styles.button, (!url.trim() || undefined) && styles.buttonDisabled]}
-          onPress={submit}
-          disabled={!url.trim()}>
-          <Text style={styles.buttonText}>保存并连接</Text>
-        </TouchableOpacity>
-        <Text style={[font.faint, {marginTop: 16}]}>
-          Kimi Code 格式：https://code-rc.kimi.com/devices/&lt;设备ID&gt;/{'\n'}
-          ZCode 格式：https://zcode.z.ai/remote/v4?sid=…&amp;mid=…{'\n'}
-          （桌面端二维码弹窗均可复制链接）
-        </Text>
+      <PageHeader title="手动输入链接" onBack={onBack} />
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.card}>
+          <Text style={font.dim}>
+            粘贴桌面端「远程控制」生成的配对链接（与二维码内容相同），支持 Kimi Code 与 ZCode：
+          </Text>
+          <TextInput
+            style={styles.urlInput}
+            placeholder={'https://code-rc.kimi.com/devices/<设备ID>/'}
+            placeholderTextColor={colors.textFaint}
+            value={url}
+            onChangeText={v => {
+              setUrl(v);
+              if (error != null) setError(null);
+            }}
+            multiline
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
+          <TextInput
+            style={styles.nameInput}
+            placeholder="自定义名称（可选，如：公司电脑）"
+            placeholderTextColor={colors.textFaint}
+            value={name}
+            onChangeText={setName}
+            autoCapitalize="none"
+          />
+          {error != null ? <Text style={styles.error}>{error}</Text> : null}
+          <TouchableOpacity
+            style={[styles.button, !url.trim() && styles.buttonDisabled]}
+            activeOpacity={0.85}
+            onPress={submit}
+            disabled={!url.trim()}>
+            <Text style={styles.buttonText}>保存并连接</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.hintCard}>
+          <Text style={font.section}>支持的链接格式</Text>
+          <Text style={font.faint}>
+            Kimi Code：https://code-rc.kimi.com/devices/&lt;设备ID&gt;/{'\n'}
+            ZCode：https://zcode.z.ai/remote/v4?sid=…&amp;mid=…{'\n'}
+            桌面端二维码弹窗均可直接复制链接。
+          </Text>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -94,7 +106,23 @@ export function ManualInputScreen({onSubmit, onDone}: ManualInputScreenProps) {
 
 const useStyles = makeStyles(colors => ({
   root: {flex: 1, backgroundColor: colors.bg},
-  content: {padding: 20, gap: 12},
+  content: {padding: 16, gap: 14},
+  card: {
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.l,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    padding: 16,
+    gap: 12,
+  },
+  hintCard: {
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.l,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    padding: 16,
+    gap: 6,
+  },
   urlInput: {
     backgroundColor: colors.bgInput,
     borderRadius: radius.m,
@@ -104,7 +132,7 @@ const useStyles = makeStyles(colors => ({
     paddingVertical: 12,
     color: colors.text,
     fontSize: 14,
-    minHeight: 90,
+    minHeight: 92,
     textAlignVertical: 'top',
   },
   nameInput: {
@@ -120,11 +148,11 @@ const useStyles = makeStyles(colors => ({
   error: {color: colors.danger, fontSize: 13},
   button: {
     backgroundColor: colors.accent,
-    borderRadius: radius.m,
+    borderRadius: radius.s,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 4,
   },
   buttonDisabled: {backgroundColor: colors.accentDim},
-  buttonText: {color: colors.onAccent, fontSize: 16, fontWeight: '600'},
+  buttonText: {color: colors.onAccent, fontSize: 15, fontWeight: '600'},
 }));

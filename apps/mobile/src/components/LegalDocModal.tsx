@@ -3,13 +3,12 @@ import {
   Modal,
   ScrollView,
   StatusBar,
-  StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import {LegalDoc} from '../legal';
 import {makeStyles, useTheme} from '../theme';
+import {PageHeader} from './PageHeader';
 
 interface LegalDocModalProps {
   doc: LegalDoc | null;
@@ -31,15 +30,7 @@ export function LegalDocModal({doc, onClose}: LegalDocModalProps) {
           barStyle={isDark ? 'light-content' : 'dark-content'}
           backgroundColor={colors.bg}
         />
-        <View style={styles.topBar}>
-          <TouchableOpacity onPress={onClose} style={styles.backButton}>
-            <Text style={styles.backText}>‹ 返回</Text>
-          </TouchableOpacity>
-          <Text style={styles.title} numberOfLines={1}>
-            {doc?.title ?? ''}
-          </Text>
-          <View style={{width: 64}} />
-        </View>
+        <PageHeader title={doc?.title ?? ''} onBack={onClose} backLabel="返回" />
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.body}>{doc?.body ?? ''}</Text>
         </ScrollView>
@@ -48,20 +39,8 @@ export function LegalDocModal({doc, onClose}: LegalDocModalProps) {
   );
 }
 
-const useStyles = makeStyles((colors, font) => ({
+const useStyles = makeStyles(colors => ({
   root: {flex: 1, backgroundColor: colors.bg},
-  topBar: {
-    height: 52,
-    backgroundColor: colors.bgElevated,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  backButton: {paddingHorizontal: 10, paddingVertical: 8},
-  backText: {color: colors.accent, fontSize: 16},
-  title: {...font.body, flex: 1, textAlign: 'center'},
   content: {padding: 20, paddingBottom: 40},
   body: {color: colors.textDim, fontSize: 14, lineHeight: 24},
 }));

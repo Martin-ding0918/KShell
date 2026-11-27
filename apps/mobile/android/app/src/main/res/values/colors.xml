@@ -2,5 +2,5 @@
 <resources>
     <!-- App window background, light scheme (theme.ts light.bg). The dark
          variant lives in values-night; both must match theme.ts. -->
-    <color name="app_background">#F4F5F7</color>
+    <color name="app_background">#F3F5F8</color>
 </resources>

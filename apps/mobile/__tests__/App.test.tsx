@@ -123,6 +123,8 @@ test('keeps Settings mounted and pauses its update polling under sub-screens', a
       if (!button) throw new Error(`Missing settings button: ${label}`);
       return ReactTestRenderer.act(async () => { await button.props.onPress(); });
     };
+    // Open Update sub-panel from Settings home, then trigger update check.
+    await press('检查更新');
     await press('检查更新');
     query.mockClear();
     await press('下载并安装');
@@ -218,7 +220,18 @@ test('SettingsScreen requires verification for lock changes, enters reset flow, 
       });
     };
 
-    // 1. Adding pattern while password lock is active must require verification first.
+    const pressBack = async () => {
+      const btn = renderer.root.findAllByType(TouchableOpacity).find(candidate =>
+        candidate.props.accessibilityLabel === '返回设置',
+      );
+      if (!btn) throw new Error('Missing sub-panel back button');
+      await ReactTestRenderer.act(async () => {
+        await btn.props.onPress();
+      });
+    };
+
+    // 1. Open 应用锁 sub-panel; adding pattern while password lock is active must require verification first.
+    await pressText('应用锁');
     await pressText('设置');
     expect(
       renderer.root.findAllByType(Text).some(t =>
@@ -226,8 +239,7 @@ test('SettingsScreen requires verification for lock changes, enters reset flow, 
       ),
     ).toBe(true);
 
-    // 2. Changing existing password must enter passwordSet after verification succeeds
-    //    (previously overwritten back to idle).
+    // 2. Changing existing password must enter passwordSet after verification succeeds.
     await pressText('更换');
     const secretInput = renderer.root.findAllByProps({placeholder: '当前密码'})[0];
     await ReactTestRenderer.act(async () => {
@@ -240,7 +252,22 @@ test('SettingsScreen requires verification for lock changes, enters reset flow, 
       ),
     ).toBe(true);
 
-    // 3. Export backup -> verify -> generate -> confirm backup Modal opens with blob.
+    // 3. Return to Settings home -> open 隐私与网页登录 -> turning off cacheWebLogin routes through onSignOutWebLogin.
+    await pressBack();
+    await pressText('隐私与网页登录');
+    const cacheSwitch = renderer.root.findAllByType(Switch).find(sw => {
+      const parent = sw.parent;
+      return parent != null && parent.findAllByType(Text).some(t => textOf(t) === '跨重启保留登录');
+    });
+    expect(cacheSwitch).toBeDefined();
+    await ReactTestRenderer.act(async () => {
+      cacheSwitch!.props.onValueChange(false);
+    });
+    expect(onSignOut).toHaveBeenCalledTimes(1);
+
+    // 4. Return to Settings home -> open 备份与恢复 -> export -> verify -> generate -> confirm backup Modal opens with blob.
+    await pressBack();
+    await pressText('备份与恢复');
     await pressText('导出备份');
     const verifyPass = renderer.root.findAllByProps({placeholder: '当前密码'})[0];
     await ReactTestRenderer.act(async () => {
@@ -260,17 +287,6 @@ test('SettingsScreen requires verification for lock changes, enters reset flow, 
     expect(
       renderer.root.findAllByType(Text).some(t => textOf(t) === 'ZSBK2.600000.TESTBACKUPBLOB'),
     ).toBe(true);
-
-    // 4. Turning off cacheWebLogin routes through unified onSignOutWebLogin.
-    const cacheSwitch = renderer.root.findAllByType(Switch).find(sw => {
-      const parent = sw.parent;
-      return parent != null && parent.findAllByType(Text).some(t => textOf(t) === '跨重启保留登录');
-    });
-    expect(cacheSwitch).toBeDefined();
-    await ReactTestRenderer.act(async () => {
-      cacheSwitch!.props.onValueChange(false);
-    });
-    expect(onSignOut).toHaveBeenCalledTimes(1);
 
     // 5. Locking dismisses the open backup modal AND wipes the backup blob so
     //    re-unlocking does not reopen it.
@@ -455,5 +471,99 @@ test('useResolvedScheme resyncs OS dark mode on foreground resume after backgrou
   } finally {
     await ReactTestRenderer.act(async () => renderer.unmount());
     jest.restoreAllMocks();
+  }
+});
+
+test('MachineListScreen shows active session indicator, opens management BottomSheet, and closes it on lock', async () => {
+  const onRename = jest.fn();
+  const machines = [
+    {
+      id: 'm1',
+      name: 'MacBook Pro',
+      credentials: {
+        sid: 'dev-123456',
+        hash: '',
+        origin: 'https://code-rc.kimi.com',
+        mid: null,
+        deviceName: null,
+        appVersion: null,
+        issuedAt: null,
+        kind: 'kimi' as const,
+      },
+      favorite: true,
+      sortOrder: 1,
+      createdAt: 1,
+      lastUsedAt: Date.now(),
+      loginState: 'logged-in' as const,
+    },
+  ];
+  const renderList = (unlocked: boolean) => (
+    <ThemeProvider scheme="dark">
+      <MachineListScreen
+        machines={machines}
+        activeSessionIds={['m1']}
+        unlocked={unlocked}
+        onConnect={() => {}}
+        onScan={() => {}}
+        onManual={() => {}}
+        onSettings={() => {}}
+        onRename={onRename}
+        onToggleFavorite={() => {}}
+        onMove={() => {}}
+        onSetMuted={() => {}}
+        onDelete={() => {}}
+        onSignOutWebLogin={() => {}}
+      />
+    </ThemeProvider>
+  );
+
+  let renderer!: ReturnType<typeof ReactTestRenderer.create>;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(renderList(true));
+  });
+
+  try {
+    const textOf = (t: {props: {children?: unknown}}) =>
+      Array.isArray(t.props.children)
+        ? t.props.children.map(String).join('')
+        : String(t.props.children ?? '');
+
+    expect(
+      renderer.root.findAllByType(Text).some(t => textOf(t) === '1 个后台会话'),
+    ).toBe(true);
+    expect(
+      renderer.root.findAllByType(Text).some(t => textOf(t) === '运行中'),
+    ).toBe(true);
+
+    const moreBtn = renderer.root.findAllByType(TouchableOpacity).find(btn =>
+      btn.props.accessibilityLabel === '管理 MacBook Pro',
+    );
+    expect(moreBtn).toBeDefined();
+    await ReactTestRenderer.act(async () => {
+      moreBtn!.props.onPress();
+    });
+    expect(renderer.root.findByType(Modal).props.visible).toBe(true);
+
+    const saveBtn = renderer.root.findAllByType(TouchableOpacity).find(btn =>
+      btn.findAllByType(Text).some(t => textOf(t) === '保存'),
+    );
+    expect(saveBtn).toBeDefined();
+    await ReactTestRenderer.act(async () => {
+      saveBtn!.props.onPress();
+    });
+    expect(onRename).toHaveBeenCalledWith('m1', 'MacBook Pro');
+    expect(renderer.root.findByType(Modal).props.visible).toBe(false);
+
+    // Reopen and verify locking immediately hides the management BottomSheet.
+    await ReactTestRenderer.act(async () => {
+      moreBtn!.props.onPress();
+    });
+    expect(renderer.root.findByType(Modal).props.visible).toBe(true);
+    await ReactTestRenderer.act(async () => {
+      renderer.update(renderList(false));
+    });
+    expect(renderer.root.findByType(Modal).props.visible).toBe(false);
+  } finally {
+    await ReactTestRenderer.act(async () => renderer.unmount());
   }
 });

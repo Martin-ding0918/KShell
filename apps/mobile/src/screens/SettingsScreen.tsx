@@ -1,31 +1,22 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
-  AppState,
+  BackHandler,
   Clipboard,
-  Linking,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import {
   activeSecrets,
-  clearMethod,
-  formatBytes,
-  formatPercent,
   installVerifier,
   isNewer as isNewerVersion,
   LockConfig,
   MachineRecord,
-  patternToString,
   recordLockFailure,
   ReleaseInfo,
-  setBiometric,
 } from '@zshell/core-shell';
 import {biometricAuth} from '../biometric';
 import {
@@ -36,26 +27,32 @@ import {
   verifySecretAsync,
 } from '../securekdf';
 import {LegalDocModal} from '../components/LegalDocModal';
+import {ListRow} from '../components/ListRow';
 import {MarkdownText} from '../components/MarkdownText';
-import {SecretInput} from '../components/SecretInput';
-import {OSS_LICENSES, PRIVACY_POLICY, USER_AGREEMENT, LegalDoc} from '../legal';
-import {AppPrefs, loadPrefs, notifications, savePrefs} from '../notifications';
+import {PageHeader} from '../components/PageHeader';
+import {LegalDoc} from '../legal';
+import {AppPrefs, loadPrefs, notifications} from '../notifications';
 import {privacyWindow} from '../privacyWindow';
-import {PatternPad} from '../PatternPad';
 import {
-  openDownloadedFile,
-  openInBrowser,
   queryDownloads,
-  removeDownload,
-  resumeDownload,
   shareTextFile,
   startUpdateDownload,
 } from '../downloads';
 import {clearLockAttempts, loadLockAttempts, saveLockAttempts} from '../storage';
-import {fetchLatestRelease, PROJECT_PAGE} from '../updater';
+import {fetchLatestRelease} from '../updater';
 import {biometricLabel} from './LockScreen';
 import {makeStyles, radius, ThemeMode, useTheme} from '../theme';
 import {APP_VERSION} from '../version';
+import {
+  AboutSettingsPanel,
+  BackupSettingsPanel,
+  LockSettingsPanel,
+  PrivacySettingsPanel,
+  Step,
+  UpdateSettingsPanel,
+  UpdateState,
+  VerifyCard,
+} from './settings/SettingsPanels';
 
 interface SettingsScreenProps {
   visible: boolean;
@@ -78,29 +75,22 @@ interface SettingsScreenProps {
 }
 
 const THEME_OPTIONS: Array<{mode: ThemeMode; label: string}> = [
-  {mode: 'system', label: '跟随系统'},
   {mode: 'light', label: '浅色'},
+  {mode: 'system', label: '跟随系统'},
   {mode: 'dark', label: '深色'},
 ];
 
-type Step =
-  | {kind: 'idle'}
-  | {kind: 'patternSet'; confirmOf: string | null}
-  | {kind: 'passwordSet'; first: string | null}
-  | {kind: 'verify'; title: string; action: () => void};
+type SubPanel = null | 'lock' | 'privacy' | 'backup' | 'update' | 'about';
 
-type UpdateState =
-  | {kind: 'idle'}
-  | {kind: 'checking'}
-  | {kind: 'failed'}
-  | {kind: 'latest'; release: ReleaseInfo}
-  | {kind: 'available'; release: ReleaseInfo}
-  | {kind: 'downloading'; release: ReleaseInfo; id: number}
-  | {kind: 'downloadPaused'; release: ReleaseInfo; id: number; reason?: string}
-  | {kind: 'downloaded'; release: ReleaseInfo; id: number}
-  | {kind: 'downloadFailed'; release: ReleaseInfo; reason: string};
+const PANEL_TITLE: Record<Exclude<SubPanel, null>, string> = {
+  lock: '应用锁',
+  privacy: '隐私与网页登录',
+  backup: '备份与恢复',
+  update: '检查更新',
+  about: '协议与诊断信息',
+};
 
-/** Settings: multi-method lock management + update check + legal center. */
+/** Streamlined Plan A settings overview with dedicated sub-panels. */
 export function SettingsScreen({
   visible,
   unlocked,
@@ -118,12 +108,9 @@ export function SettingsScreen({
   themeMode,
   onChangeThemeMode,
 }: SettingsScreenProps) {
-  const {colors, font} = useTheme();
+  const {font} = useTheme();
   const styles = useStyles();
-  const switchColors = {
-    trackColor: {false: colors.switchTrackOff, true: colors.accent},
-    thumbColor: colors.switchThumb,
-  };
+  const [subPanel, setSubPanel] = useState<SubPanel>(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricType, setBiometricType] = useState<string | undefined>();
   const [step, setStep] = useState<Step>({kind: 'idle'});
@@ -135,19 +122,8 @@ export function SettingsScreen({
   const [openApkError, setOpenApkError] = useState<string | null>(null);
   const [notesRelease, setNotesRelease] = useState<ReleaseInfo | null>(null);
   const [prefs, setPrefs] = useState<AppPrefs>(() => loadPrefs());
-
-  // ---------- privacy ----------
-
-  /** Recents-mask toggle, owned by native SharedPreferences (see privacyWindow.ts). */
   const [recentsMask, setRecentsMask] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    privacyWindow?.getRecentsMaskEnabled().then(setRecentsMask);
-  }, []);
-
-  // ---------- backup & restore ----------
-
-  /** null = idle; 'export' / 'restore' shown after lock verification. */
   const [backupMode, setBackupMode] = useState<'export' | 'restore' | null>(null);
   const [backupPass, setBackupPass] = useState('');
   const [backupPass2, setBackupPass2] = useState('');
@@ -155,7 +131,6 @@ export function SettingsScreen({
   const [restorePass, setRestorePass] = useState('');
   const [backupBlob, setBackupBlob] = useState<string | null>(null);
   const [restoreResult, setRestoreResult] = useState<string | null>(null);
-  /** Web login wipe: two-tap arm + result feedback. */
   const [webClearArm, setWebClearArm] = useState(false);
   const [webClearResult, setWebClearResult] = useState<string | null>(null);
   const [attempts, setAttempts] = useState(loadLockAttempts);
@@ -177,6 +152,10 @@ export function SettingsScreen({
   }, []);
 
   useEffect(() => {
+    privacyWindow?.getRecentsMaskEnabled().then(setRecentsMask);
+  }, []);
+
+  useEffect(() => {
     if (visible) {
       setPrefs(loadPrefs());
       setAttempts(loadLockAttempts());
@@ -193,6 +172,7 @@ export function SettingsScreen({
   // Wipe sensitive in-memory state and dismiss all modals as soon as the app locks.
   useEffect(() => {
     if (!unlocked) {
+      setSubPanel(null);
       setBackupBlob(null);
       setBackupMode(null);
       setBackupPass('');
@@ -224,15 +204,38 @@ export function SettingsScreen({
     });
   }, []);
 
+  const closeSubPanel = useCallback(() => {
+    setSubPanel(null);
+    setStep({kind: 'idle'});
+    setBackupMode(null);
+    setPasswordValue('');
+    setBackupPass('');
+    setBackupPass2('');
+    setRestoreBlob('');
+    setRestorePass('');
+    setError(null);
+    setWebClearArm(false);
+  }, []);
+
+  // Intercept Android hardware back while inside a settings sub-panel.
+  useEffect(() => {
+    if (!visible || subPanel == null) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeSubPanel();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, subPanel, closeSubPanel]);
+
   const secrets = activeSecrets(lock);
   const onlyBiometric = lock.methods.biometric && secrets.length === 0;
   const enabledNames = [
     lock.methods.biometric ? biometricLabel(biometricType) : null,
     lock.methods.pattern != null ? '图案' : null,
     lock.methods.password != null ? '密码' : null,
-  ].filter(n => n != null);
+  ].filter((n): n is string => n != null);
 
-  // ---------- lock management ----------
+  // ---------- lock & verification handlers ----------
 
   const requestVerify = (title: string, action: () => void) => {
     setPasswordValue('');
@@ -302,9 +305,7 @@ export function SettingsScreen({
   };
 
   const submitPasswordSet = () => {
-    if (step.kind !== 'passwordSet') {
-      return;
-    }
+    if (step.kind !== 'passwordSet') return;
     if (password.length < 4) {
       setError('密码至少 4 位');
       return;
@@ -322,21 +323,7 @@ export function SettingsScreen({
     }
   };
 
-  // ---------- update flow ----------
-
-  const checkUpdate = async () => {
-    setUpdate({kind: 'checking'});
-    const release = await fetchLatestRelease();
-    if (release == null) {
-      setUpdate({kind: 'failed'});
-      return;
-    }
-    setUpdate(
-      isNewerVersion(APP_VERSION, release)
-        ? {kind: 'available', release}
-        : {kind: 'latest', release},
-    );
-  };
+  // ---------- backup handlers ----------
 
   const doExportBackup = async () => {
     setError(null);
@@ -360,9 +347,7 @@ export function SettingsScreen({
     });
     try {
       const blob = await encryptBackupAsync(payload, backupPass, await secureRandomBytes(16));
-      if (!mountedRef.current || !unlockedRef.current) {
-        return;
-      }
+      if (!mountedRef.current || !unlockedRef.current) return;
       setBackupBlob(blob);
     } catch {
       if (mountedRef.current && unlockedRef.current) {
@@ -386,9 +371,7 @@ export function SettingsScreen({
       }
       return;
     }
-    if (!mountedRef.current || !unlockedRef.current) {
-      return;
-    }
+    if (!mountedRef.current || !unlockedRef.current) return;
     if (json == null) {
       setError('解密失败：口令不对，或备份内容损坏');
       return;
@@ -410,6 +393,22 @@ export function SettingsScreen({
     setRestorePass('');
   };
 
+  // ---------- update flow ----------
+
+  const checkUpdate = async () => {
+    setUpdate({kind: 'checking'});
+    const release = await fetchLatestRelease();
+    if (release == null) {
+      setUpdate({kind: 'failed'});
+      return;
+    }
+    setUpdate(
+      isNewerVersion(APP_VERSION, release)
+        ? {kind: 'available', release}
+        : {kind: 'latest', release},
+    );
+  };
+
   const startDownload = async (release: ReleaseInfo) => {
     setOpenApkError(null);
     setProgress(null);
@@ -422,8 +421,6 @@ export function SettingsScreen({
     }
   };
 
-  // Refresh the card immediately when Settings becomes visible. DownloadManager
-  // continues independently while a sub-screen covers Settings.
   useEffect(() => {
     if (!visible || (update.kind !== 'downloading' && update.kind !== 'downloadPaused')) {
       return;
@@ -434,12 +431,9 @@ export function SettingsScreen({
     const poll = async () => {
       try {
         const items = await queryDownloads();
-        if (cancelled) {
-          return;
-        }
+        if (cancelled) return;
         const item = items.find(i => i.id === id);
         if (item == null) {
-          // Removed elsewhere (e.g. cancelled in 下载管理).
           setUpdate({kind: 'available', release});
           setProgress(null);
           return;
@@ -456,8 +450,6 @@ export function SettingsScreen({
         }
         if (item.status === 'paused') {
           if (!wasPaused) {
-            // Usually "waiting for network": surface the pause instead of
-            // showing 下载中 forever; it auto-resumes when the cause clears.
             if (loadPrefs().notificationsEnabled && notifications != null) {
               notifications.notify(
                 7,
@@ -471,7 +463,6 @@ export function SettingsScreen({
           return;
         }
         if (wasPaused) {
-          // Moved back to pending/running on its own — follow along.
           setUpdate({kind: 'downloading', release, id});
           return;
         }
@@ -488,779 +479,247 @@ export function SettingsScreen({
     };
   }, [update, visible]);
 
-  const sizeText = (bytes: number | null) =>
-    bytes == null ? '' : `${Math.round(bytes / 1048576)} MB`;
+  const verifyCard =
+    step.kind === 'verify' ? (
+      <VerifyCard
+        step={step}
+        lock={lock}
+        biometricAvailable={biometricAvailable}
+        biometricType={biometricType}
+        biometricInFlight={biometricInFlight}
+        mountedRef={mountedRef}
+        unlockedRef={unlockedRef}
+        password={password}
+        setPasswordValue={setPasswordValue}
+        verifying={verifying}
+        verifyRemaining={verifyRemaining}
+        error={error}
+        setError={setError}
+        onBiometricVerified={action => {
+          setAttempts({failures: 0, retryAt: 0});
+          setStep({kind: 'idle'});
+          setError(null);
+          action();
+        }}
+        verifyBySecret={verifyBySecret}
+        onCancel={() => {
+          setStep({kind: 'idle'});
+          setPasswordValue('');
+          setError(null);
+        }}
+      />
+    ) : null;
+
+  const updateBadge =
+    update.kind === 'available' || update.kind === 'downloaded'
+      ? `有新版本 v${update.release.version}`
+      : undefined;
+  const updateValue =
+    update.kind === 'downloading'
+      ? '下载中…'
+      : update.kind === 'downloadPaused'
+        ? '已暂停'
+        : update.kind === 'latest'
+          ? '已是最新'
+          : undefined;
 
   return (
-    <ScrollView
-      style={styles.root}
-      contentContainerStyle={{padding: 16, gap: 14}}
-      importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
-      pointerEvents={visible ? 'auto' : 'none'}>
-      <TouchableOpacity onPress={onBack} style={{paddingVertical: 4}}>
-        <Text style={{color: colors.accent, fontSize: 16}}>‹ 返回列表</Text>
-      </TouchableOpacity>
-      <Text style={styles.pageTitle}>设置</Text>
+    <View style={styles.root}>
+      <PageHeader
+        title={subPanel == null ? '设置' : PANEL_TITLE[subPanel]}
+        onBack={subPanel == null ? onBack : closeSubPanel}
+        backLabel={subPanel == null ? '返回列表' : '返回设置'}
+      />
 
-      {/* ================= 外观 ================= */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>外观</Text>
-        <View style={styles.segment} accessibilityRole="radiogroup">
-          {THEME_OPTIONS.map(opt => {
-            const active = themeMode === opt.mode;
-            return (
-              <TouchableOpacity
-                key={opt.mode}
-                style={[styles.segmentItem, active && styles.segmentItemActive]}
-                accessibilityRole="radio"
-                accessibilityState={{selected: active}}
-                onPress={() => onChangeThemeMode(opt.mode)}>
-                <Text
-                  style={[styles.segmentText, active && styles.segmentTextActive]}>
-                  {opt.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-        <Text style={font.faint}>
-          {themeMode === 'system'
-            ? '随安卓系统的深色模式自动切换'
-            : '已固定外观，不随系统切换'}
-        </Text>
-      </View>
-
-      {/* ================= 应用锁 ================= */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>应用锁</Text>
-        <Text style={font.dim}>
-          {lock.enabled
-            ? `已启用：${enabledNames.join(' + ')}，任选一种即可解锁`
-            : '未启用。可以同时开启多种解锁方式，避免单一方式失灵时被锁在外面'}
-        </Text>
-        {onlyBiometric ? (
-          <Text style={styles.hintWarn}>
-            当前仅启用生物识别，建议再设置图案或密码作为备用
-          </Text>
-        ) : null}
-
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>{biometricLabel(biometricType)}</Text>
-            <Text style={font.faint}>
-              {biometricAvailable
-                ? '验证通过后开启；使用系统指纹 / 人脸'
-                : '本机暂无可用生物识别（容器/模拟器通常不支持）'}
-            </Text>
-          </View>
-          <Switch
-            value={lock.methods.biometric}
-            disabled={!biometricAvailable && !lock.methods.biometric}
-            onValueChange={async on => {
-              setError(null);
-              const enableBiometric = async () => {
-                if (biometricInFlight.current) {
-                  return;
-                }
-                biometricInFlight.current = true;
-                try {
-                  const ok = await biometricAuth.prompt('验证通过后开启生物识别');
-                  if (!mountedRef.current || !unlockedRef.current) {
-                    return;
-                  }
-                  if (ok && AppState.currentState === 'active') {
-                    onSaveLock(setBiometric(lock, true));
-                  } else if (!ok) {
-                    setError('验证未通过，未开启生物识别');
-                  }
-                } catch {
-                  if (mountedRef.current && unlockedRef.current) {
-                    setError('验证暂不可用，请重试');
-                  }
-                } finally {
-                  biometricInFlight.current = false;
-                }
-              };
-              if (!on) {
-                requestVerify(`关闭${biometricLabel(biometricType)}`, () =>
-                  onSaveLock(setBiometric(lock, false)),
-                );
-                return;
-              }
-              if (lock.enabled) {
-                requestVerify(`开启${biometricLabel(biometricType)}`, () => {
-                  void enableBiometric();
-                });
-                return;
-              }
-              await enableBiometric();
-            }}
-            {...switchColors}
-          />
-        </View>
-        <View style={styles.divider} />
-
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>图案</Text>
-            <Text style={font.faint}>
-              {lock.methods.pattern != null ? '已设置' : '未设置'}
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.rowButton}
-            onPress={() => {
-              setError(null);
-              if (lock.enabled) {
-                // Any mutation while app lock is active requires verification first.
-                requestVerify(
-                  lock.methods.pattern != null ? '更换图案' : '设置图案',
-                  () => {
-                    setStep({kind: 'patternSet', confirmOf: null});
-                    setError(null);
-                  },
-                );
-              } else {
-                setStep({kind: 'patternSet', confirmOf: null});
-              }
-            }}>
-            <Text style={styles.rowButtonText}>
-              {lock.methods.pattern != null ? '更换' : '设置'}
-            </Text>
-          </TouchableOpacity>
-          {lock.methods.pattern != null ? (
-            <TouchableOpacity
-              style={styles.rowButton}
-              onPress={() =>
-                requestVerify('清除图案', () =>
-                  onSaveLock(clearMethod(lock, 'pattern')),
-                )
-              }>
-              <Text style={[styles.rowButtonText, {color: colors.danger}]}>
-                清除
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
+        pointerEvents={visible ? 'auto' : 'none'}
+        keyboardShouldPersistTaps="handled">
+        {subPanel == null ? (
+          <>
+            {/* 外观 */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>外观</Text>
+              <View style={styles.segment} accessibilityRole="radiogroup">
+                {THEME_OPTIONS.map(opt => {
+                  const active = themeMode === opt.mode;
+                  return (
+                    <TouchableOpacity
+                      key={opt.mode}
+                      style={[styles.segmentItem, active && styles.segmentItemActive]}
+                      accessibilityRole="radio"
+                      accessibilityState={{selected: active}}
+                      onPress={() => onChangeThemeMode(opt.mode)}>
+                      <Text
+                        style={[styles.segmentText, active && styles.segmentTextActive]}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={[font.faint, {textAlign: 'center'}]}>
+                {themeMode === 'system'
+                  ? '随系统深色模式自动切换'
+                  : '已固定外观，不随系统切换'}
               </Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        <View style={styles.divider} />
+            </View>
 
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>密码</Text>
-            <Text style={font.faint}>
-              {lock.methods.password != null ? '已设置' : '未设置'}
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.rowButton}
-            onPress={() => {
-              setError(null);
-              setPasswordValue('');
-              if (lock.enabled) {
-                requestVerify(
-                  lock.methods.password != null ? '更换密码' : '设置密码',
-                  () => {
-                    setStep({kind: 'passwordSet', first: null});
-                    setError(null);
-                  },
-                );
-              } else {
-                setStep({kind: 'passwordSet', first: null});
-              }
-            }}>
-            <Text style={styles.rowButtonText}>
-              {lock.methods.password != null ? '更换' : '设置'}
-            </Text>
-          </TouchableOpacity>
-          {lock.methods.password != null ? (
-            <TouchableOpacity
-              style={styles.rowButton}
-              onPress={() =>
-                requestVerify('清除密码', () =>
-                  onSaveLock(clearMethod(lock, 'password')),
-                )
-              }>
-              <Text style={[styles.rowButtonText, {color: colors.danger}]}>
-                清除
-              </Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-        {step.kind === 'patternSet' ? (
-          <View style={{alignItems: 'center', marginTop: 14}}>
-            <Text style={font.dim}>
-              {step.confirmOf == null ? '设置解锁图案' : '请再画一次确认'}
-            </Text>
-            <View style={{marginTop: 30, marginBottom: 40}}>
-              <PatternPad
-                hint={error ?? '至少连接 4 个点'}
-                onComplete={dots => {
-                  if (dots.length < 4) {
-                    setError('至少连接 4 个点');
-                    return;
-                  }
-                  const secret = patternToString(dots);
-                  if (step.confirmOf == null) {
-                    setStep({...step, confirmOf: secret});
-                  } else if (step.confirmOf === secret) {
-                    finishPatternSet(secret);
-                  } else {
-                    setError('两次图案不一致，请重新设置');
-                    setStep({...step, confirmOf: null});
-                  }
-                }}
+            {/* 安全与隐私 */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>安全与隐私</Text>
+              <ListRow
+                icon="lock"
+                title="应用锁"
+                value={lock.enabled ? enabledNames.join(' + ') : '未启用'}
+                onPress={() => setSubPanel('lock')}
+              />
+              <ListRow
+                icon="eye-off"
+                title="隐私与网页登录"
+                value={recentsMask === false ? '遮罩已关' : '遮罩已开'}
+                onPress={() => setSubPanel('privacy')}
+                showDivider
               />
             </View>
-          </View>
+
+            {/* 通用与数据 */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>通用与数据</Text>
+              <ListRow
+                icon="bell"
+                title="通知与权限"
+                onPress={onOpenPermissions}
+              />
+              <ListRow
+                icon="download"
+                title="下载管理"
+                onPress={onOpenDownloads}
+                showDivider
+              />
+              <ListRow
+                icon="backup"
+                title="备份与恢复"
+                onPress={() => setSubPanel('backup')}
+                showDivider
+              />
+              <ListRow
+                icon="database"
+                title="数据管理"
+                onPress={onOpenDataManage}
+                showDivider
+              />
+            </View>
+
+            {/* 关于与更新 */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>关于与更新</Text>
+              <ListRow
+                icon="refresh"
+                title="检查更新"
+                badge={updateBadge}
+                badgeDot={updateBadge != null}
+                value={updateValue}
+                onPress={() => setSubPanel('update')}
+              />
+              <ListRow
+                icon="info"
+                title="协议与诊断信息"
+                value={`v${APP_VERSION}`}
+                onPress={() => setSubPanel('about')}
+                showDivider
+              />
+            </View>
+          </>
         ) : null}
 
-        {step.kind === 'passwordSet' ? (
-          <View style={{gap: 10, marginTop: 10}}>
-            <Text style={font.dim}>
-              {step.first == null ? '设置解锁密码（至少 4 位）' : '请再输入一次确认'}
-            </Text>
-            <SecretInput
-              placeholder={step.first == null ? '输入密码' : '再次输入密码'}
-              value={password}
-              onChangeText={setPasswordValue}
-              onSubmitEditing={submitPasswordSet}
-            />
-            <TouchableOpacity style={styles.primaryButton} onPress={submitPasswordSet}>
-              <Text style={styles.primaryButtonText}>下一步</Text>
-            </TouchableOpacity>
-            {error != null ? <Text style={styles.errorText}>{error}</Text> : null}
-          </View>
-        ) : null}
-
-        {step.kind === 'verify' ? (
-          <View style={{gap: 10, marginTop: 10}}>
-            <Text style={font.dim}>{step.title}（可用任意已启用的方式）</Text>
-            {lock.methods.biometric && biometricAvailable ? (
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={async () => {
-                  if (biometricInFlight.current) {
-                    return;
-                  }
-                  biometricInFlight.current = true;
-                  setError(null);
-                  try {
-                    const ok = await biometricAuth.prompt('验证以继续');
-                    if (!mountedRef.current || !unlockedRef.current) {
-                      return;
-                    }
-                    if (ok && AppState.currentState === 'active') {
-                      clearLockAttempts();
-                      setAttempts({failures: 0, retryAt: 0});
-                      const nextAction = step.action;
-                      setStep({kind: 'idle'});
-                      setError(null);
-                      nextAction();
-                    } else if (!ok) {
-                      setError('验证未通过');
-                    }
-                  } catch {
-                    if (mountedRef.current && unlockedRef.current) {
-                      setError('生物识别暂不可用，请使用备用方式');
-                    }
-                  } finally {
-                    biometricInFlight.current = false;
-                  }
-                }}>
-                <Text style={styles.primaryButtonText}>
-                  使用{biometricLabel(biometricType)}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {lock.methods.pattern != null ? (
-              <View style={{alignItems: 'center', marginVertical: 10}}>
-                <PatternPad
-                  hint={
-                    verifyRemaining > 0
-                      ? `请等待 ${verifyRemaining} 秒`
-                      : error ?? '绘制当前图案'
-                  }
-                  onComplete={dots =>
-                    verifyBySecret('pattern', patternToString(dots), step.action)
-                  }
-                />
-              </View>
-            ) : null}
-            {lock.methods.password != null ? (
-              <>
-                <SecretInput
-                  placeholder="当前密码"
-                  editable={!verifying && verifyRemaining === 0}
-                  value={password}
-                  onChangeText={setPasswordValue}
-                  onSubmitEditing={() =>
-                    verifyBySecret('password', password, step.action)
-                  }
-                />
-                <TouchableOpacity
-                  style={styles.primaryButton}
-                  disabled={verifying || verifyRemaining > 0}
-                  onPress={() => verifyBySecret('password', password, step.action)}>
-                  <Text style={styles.primaryButtonText}>验证</Text>
-                </TouchableOpacity>
-              </>
-            ) : null}
-            {verifyRemaining > 0 ? (
-              <Text style={styles.errorText}>请等待 {verifyRemaining} 秒后重试</Text>
-            ) : null}
-            {error != null ? <Text style={styles.errorText}>{error}</Text> : null}
-          </View>
-        ) : null}
-      </View>
-
-      {/* ================= 隐私 ================= */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>隐私</Text>
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>最近任务遮罩</Text>
-            <Text style={font.faint}>
-              {Platform.OS === 'android' && Platform.Version >= 36
-                ? '系统原生支持：预览被遮蔽，不影响应用内截图与录屏'
-                : '此系统不区分预览与截图：开启时应用内将无法截图或录屏；关闭后最近任务预览会显示应用画面'}
-            </Text>
-          </View>
-          <Switch
-            value={recentsMask ?? true}
-            disabled={recentsMask == null || privacyWindow == null}
-            onValueChange={on => {
-              privacyWindow?.setRecentsMaskEnabled(on);
-              setRecentsMask(on);
-            }}
-            {...switchColors}
+        {subPanel === 'lock' ? (
+          <LockSettingsPanel
+            lock={lock}
+            enabledNames={enabledNames}
+            onlyBiometric={onlyBiometric}
+            biometricAvailable={biometricAvailable}
+            biometricType={biometricType}
+            biometricInFlight={biometricInFlight}
+            mountedRef={mountedRef}
+            unlockedRef={unlockedRef}
+            step={step}
+            setStep={setStep}
+            password={password}
+            setPasswordValue={setPasswordValue}
+            error={error}
+            setError={setError}
+            onSaveLock={onSaveLock}
+            requestVerify={requestVerify}
+            finishPatternSet={finishPatternSet}
+            submitPasswordSet={submitPasswordSet}
+            verifyCard={verifyCard}
           />
-        </View>
-      </View>
+        ) : null}
 
-      {/* ================= 备份与恢复 ================= */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>备份与恢复</Text>
-        <Text style={font.faint}>
-          把配对记录加密成一段文本，换机或重装后可恢复；口令丢失无法找回
-        </Text>
-        {backupMode == null ? (
-          <View style={{flexDirection: 'row', gap: 10, marginTop: 2}}>
-            <TouchableOpacity
-              style={styles.rowButton}
-              onPress={() => {
-                setError(null);
-                setRestoreResult(null);
-                if (lock.enabled) {
-                  requestVerify('导出备份', () => setBackupMode('export'));
-                } else {
-                  setBackupMode('export');
-                }
-              }}>
-              <Text style={styles.rowButtonText}>导出备份</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.rowButton}
-              onPress={() => {
-                setError(null);
-                setRestoreResult(null);
-                if (lock.enabled) {
-                  requestVerify('恢复备份', () => setBackupMode('restore'));
-                } else {
-                  setBackupMode('restore');
-                }
-              }}>
-              <Text style={styles.rowButtonText}>从备份恢复</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-        {backupMode === 'export' ? (
-          <View style={{gap: 10, marginTop: 4}}>
-            <Text style={font.dim}>
-              设置备份口令（至少 12 位，建议使用长且独特的口令，只用于加密，应用本身不保存它）
-            </Text>
-            <SecretInput
-              placeholder="备份口令"
-              value={backupPass}
-              onChangeText={setBackupPass}
-            />
-            <SecretInput
-              placeholder="再输入一次"
-              value={backupPass2}
-              onChangeText={setBackupPass2}
-            />
-            <TouchableOpacity style={styles.primaryButton} onPress={doExportBackup}>
-              <Text style={styles.primaryButtonText}>生成备份</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{alignItems: 'center'}}
-              onPress={() => {
-                setBackupMode(null);
-                setError(null);
-                setBackupPass('');
-                setBackupPass2('');
-              }}>
-              <Text style={{color: colors.textDim, fontSize: 13}}>取消</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-        {backupMode === 'restore' ? (
-          <View style={{gap: 10, marginTop: 4}}>
-            <Text style={font.dim}>粘贴之前导出的备份文本（支持 ZSBK1 和 ZSBK2）</Text>
-            <TextInput
-              style={[styles.input, {height: 88, textAlignVertical: 'top'}]}
-              placeholder="ZSBK2.……"
-              placeholderTextColor={colors.textFaint}
-              multiline
-              value={restoreBlob}
-              onChangeText={setRestoreBlob}
-            />
-            <SecretInput
-              placeholder="备份口令"
-              value={restorePass}
-              onChangeText={setRestorePass}
-            />
-            <TouchableOpacity style={styles.primaryButton} onPress={doRestoreBackup}>
-              <Text style={styles.primaryButtonText}>恢复</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{alignItems: 'center'}}
-              onPress={() => {
-                setBackupMode(null);
-                setError(null);
-                setRestoreBlob('');
-                setRestorePass('');
-              }}>
-              <Text style={{color: colors.textDim, fontSize: 13}}>取消</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-        {restoreResult != null ? (
-          <Text style={{color: colors.success, fontSize: 13}}>{restoreResult}</Text>
-        ) : null}
-        {error != null && backupMode != null ? (
-          <Text style={styles.errorText}>{error}</Text>
-        ) : null}
-      </View>
-
-      {/* ================= 网页登录状态 ================= */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>网页登录状态</Text>
-        <Text style={font.faint}>
-          控制台网页的登录数据保存在应用内：Kimi 机器共用 Kimi 账号登录（覆盖层授权），
-          ZCode 机器在控制台页内登录与桌面端一致的账号
-        </Text>
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>跨重启保留登录</Text>
-            <Text style={font.faint}>关闭后每次启动应用都需重新登录</Text>
-          </View>
-          <Switch
-            value={prefs.cacheWebLogin}
-            onValueChange={on => {
-              const next = {...loadPrefs(), cacheWebLogin: on};
-              setPrefs(next);
-              savePrefs(next);
-              if (!on) {
-                // 关闭立即兑现语义：卸载保活会话并清一次登录数据
-                onSignOutWebLogin().catch(() => {});
-              }
-            }}
-            {...switchColors}
+        {subPanel === 'privacy' ? (
+          <PrivacySettingsPanel
+            recentsMask={recentsMask}
+            setRecentsMask={setRecentsMask}
+            prefs={prefs}
+            setPrefs={setPrefs}
+            onSignOutWebLogin={onSignOutWebLogin}
+            webClearArm={webClearArm}
+            setWebClearArm={setWebClearArm}
+            webClearResult={webClearResult}
+            setWebClearResult={setWebClearResult}
           />
-        </View>
-        <View style={styles.divider} />
-        <TouchableOpacity
-          style={[styles.rowButton, webClearArm && styles.rowButtonArmed]}
-          onPress={async () => {
-            if (!webClearArm) {
-              setWebClearArm(true);
-              return;
-            }
-            setWebClearArm(false);
-            try {
-              await onSignOutWebLogin();
-              setWebClearResult('已清除全部网页登录数据');
-            } catch {
-              setWebClearResult('清除失败，可稍后重试');
-            }
-          }}>
-          <Text style={styles.rowButtonText}>
-            {webClearArm ? '再点一次确认清除' : '清除全部网页登录数据'}
-          </Text>
-        </TouchableOpacity>
-        {webClearResult != null ? (
-          <Text style={{color: colors.textDim, fontSize: 13}}>{webClearResult}</Text>
         ) : null}
-      </View>
 
-      {/* ================= 更新 ================= */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>更新</Text>
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>当前版本 v{APP_VERSION}</Text>
-            <Text style={font.faint}>从 GitHub Releases 检查新版本</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.rowButton}
-            disabled={
-              update.kind === 'checking' ||
-              update.kind === 'downloading' ||
-              update.kind === 'downloadPaused'
-            }
-            onPress={checkUpdate}>
-            <Text style={styles.rowButtonText}>
-              {update.kind === 'checking' ? '检查中…' : '检查更新'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.divider} />
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>启动时自动检查</Text>
-            <Text style={font.faint}>发现新版本时本地通知提醒（不自动安装）</Text>
-          </View>
-          <Switch
-            value={prefs.autoCheckUpdates}
-            onValueChange={on => {
-              const next = {...loadPrefs(), autoCheckUpdates: on};
-              setPrefs(next);
-              savePrefs(next);
-            }}
-            {...switchColors}
+        {subPanel === 'backup' ? (
+          <BackupSettingsPanel
+            lock={lock}
+            backupMode={backupMode}
+            setBackupMode={setBackupMode}
+            backupPass={backupPass}
+            setBackupPass={setBackupPass}
+            backupPass2={backupPass2}
+            setBackupPass2={setBackupPass2}
+            restoreBlob={restoreBlob}
+            setRestoreBlob={setRestoreBlob}
+            restorePass={restorePass}
+            setRestorePass={setRestorePass}
+            restoreResult={restoreResult}
+            setRestoreResult={setRestoreResult}
+            error={error}
+            setError={setError}
+            requestVerify={requestVerify}
+            doExportBackup={doExportBackup}
+            doRestoreBackup={doRestoreBackup}
+            verifyCard={verifyCard}
           />
-        </View>
-
-        <View style={styles.divider} />
-
-        {update.kind === 'failed' ? (
-          <Text style={styles.errorText}>
-            检查失败：无法访问 GitHub（国内网络可能需要代理）
-          </Text>
         ) : null}
-        {update.kind === 'latest' ? (
-          <View style={{gap: 8, marginTop: 4}}>
-            <Text style={font.faint}>已是最新版本（v{update.release.version}）。</Text>
-            {/* Same-version re-download: covers republished releases. */}
-            <TouchableOpacity
-              style={styles.rowButton}
-              onPress={() => startDownload(update.release)}>
-              <Text style={styles.rowButtonText}>重新下载安装当前版本</Text>
-            </TouchableOpacity>
-          </View>
+
+        {subPanel === 'update' ? (
+          <UpdateSettingsPanel
+            update={update}
+            setUpdate={setUpdate}
+            progress={progress}
+            setProgress={setProgress}
+            openApkError={openApkError}
+            setOpenApkError={setOpenApkError}
+            prefs={prefs}
+            setPrefs={setPrefs}
+            checkUpdate={checkUpdate}
+            startDownload={startDownload}
+            setNotesRelease={setNotesRelease}
+          />
         ) : null}
-        {update.kind === 'available' || update.kind === 'downloading' || update.kind === 'downloadPaused' || update.kind === 'downloaded' || update.kind === 'downloadFailed' ? (
-          <View style={{gap: 10, marginTop: 10}}>
-            <Text style={font.body}>
-              新版本 v{update.release.version}
-              {update.release.apkSize != null
-                ? ` · ${sizeText(update.release.apkSize)}`
-                : ''}
-            </Text>
-            {update.release.notes.length > 0 ? (
-              <TouchableOpacity
-                onPress={() => setNotesRelease(update.release)}
-                activeOpacity={0.7}>
-                <Text style={font.faint} numberOfLines={4}>
-                  {update.release.notes}
-                </Text>
-                <Text style={{color: colors.accent, fontSize: 13, marginTop: 4}}>
-                  查看完整说明 ›
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {update.kind === 'downloading' ? (
-              <View style={{gap: 6}}>
-                <View style={styles.track}>
-                  <View
-                    style={[
-                      styles.fill,
-                      {
-                        width: `${
-                          progress != null && progress.total > 0
-                            ? Math.min(100, (progress.bytes / progress.total) * 100)
-                            : 0
-                        }%`,
-                      },
-                    ]}
-                  />
-                </View>
-                <Text style={font.faint}>
-                  {progress != null && progress.total > 0
-                    ? `下载中 ${formatPercent(progress.bytes, progress.total)} · ` +
-                      `${formatBytes(progress.bytes)} / ${formatBytes(progress.total)}`
-                    : progress != null && progress.bytes > 0
-                      ? `下载中 · ${formatBytes(progress.bytes)}`
-                      : '等待开始下载…'}
-                  （进度也可在 下载管理 查看，完成后自动弹出安装）
-                </Text>
-              </View>
-            ) : null}
-            {update.kind === 'downloadPaused' ? (
-              <View style={{gap: 8}}>
-                <Text style={styles.hintWarn}>
-                  下载已暂停{update.reason ? ` · ${update.reason}` : ''}，
-                  网络恢复后会自动继续
-                </Text>
-                <View style={{flexDirection: 'row', gap: 12, alignItems: 'center'}}>
-                  <TouchableOpacity
-                    style={styles.rowButton}
-                    onPress={() => {
-                      setOpenApkError(null);
-                      resumeDownload(update.id)
-                        .then(newId =>
-                          setUpdate({kind: 'downloading', release: update.release, id: newId}),
-                        )
-                        .catch(e => {
-                          setOpenApkError(
-                            e instanceof Error && e.message ? e.message : '无法继续下载',
-                          );
-                        });
-                    }}>
-                    <Text style={styles.rowButtonText}>继续下载</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.rowButton}
-                    onPress={() => {
-                      removeDownload(update.id).catch(() => {});
-                      setUpdate({kind: 'available', release: update.release});
-                      setProgress(null);
-                    }}>
-                    <Text style={styles.rowButtonText}>取消下载</Text>
-                  </TouchableOpacity>
-                </View>
-                {openApkError != null ? (
-                  <Text style={styles.errorText}>{openApkError}</Text>
-                ) : null}
-              </View>
-            ) : null}
-            {update.kind === 'downloaded' ? (
-              <View style={{gap: 8}}>
-                <Text style={{color: colors.success, fontSize: 13}}>
-                  安装包已下载完成，安装器应已自动弹出
-                </Text>
-                <TouchableOpacity
-                  style={styles.primaryButton}
-                  onPress={() => {
-                    setOpenApkError(null);
-                    openDownloadedFile(update.id).catch(e => {
-                      setOpenApkError(
-                        e instanceof Error && e.message ? e.message : '无法打开安装包',
-                      );
-                    });
-                  }}>
-                  <Text style={styles.primaryButtonText}>打开安装包</Text>
-                </TouchableOpacity>
-                {openApkError != null ? (
-                  <Text style={styles.errorText}>{openApkError}</Text>
-                ) : null}
-              </View>
-            ) : null}
-            {update.kind === 'available' ? (
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={() => startDownload(update.release)}>
-                <Text style={styles.primaryButtonText}>
-                  下载并安装
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {update.kind === 'downloadFailed' ? (
-              <View style={{gap: 8}}>
-                <Text style={styles.errorText}>{update.reason}</Text>
-                <View style={{flexDirection: 'row', gap: 12, alignItems: 'center'}}>
-                  <TouchableOpacity
-                    style={styles.rowButton}
-                    onPress={() => openInBrowser(update.release.apkUrl)}>
-                    <Text style={styles.rowButtonText}>浏览器下载</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.rowButton}
-                    onPress={() => {
-                      Clipboard.setString(update.release.apkUrl);
-                    }}>
-                    <Text style={styles.rowButtonText}>复制链接</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : null}
-          </View>
+
+        {subPanel === 'about' ? (
+          <AboutSettingsPanel
+            onOpenDoc={setOpenDoc}
+            onOpenDiagnostics={onOpenDiagnostics}
+          />
         ) : null}
-      </View>
-
-      {/* ================= 下载管理（二级页面） ================= */}
-      <TouchableOpacity style={styles.card} onPress={onOpenDownloads}>
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>下载管理</Text>
-            <Text style={font.faint}>应用更新与控制台文件的下载进度、暂停继续、取消与打开</Text>
-          </View>
-          <Text style={{color: colors.textFaint, fontSize: 18}}>›</Text>
-        </View>
-      </TouchableOpacity>
-
-      {/* ================= 数据管理（二级页面） ================= */}
-      <TouchableOpacity style={styles.card} onPress={onOpenDataManage}>
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>数据管理</Text>
-            <Text style={font.faint}>本机数据占用环形图、日志与下载缓存清理，安全配置受保护</Text>
-          </View>
-          <Text style={{color: colors.textFaint, fontSize: 18}}>›</Text>
-        </View>
-      </TouchableOpacity>
-
-      {/* ================= 权限与通知（二级页面） ================= */}
-      <TouchableOpacity style={styles.card} onPress={onOpenPermissions}>
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>权限与通知</Text>
-            <Text style={font.faint}>相机 / 系统通知权限的检查与申请，状态通知开关</Text>
-          </View>
-          <Text style={{color: colors.textFaint, fontSize: 18}}>›</Text>
-        </View>
-      </TouchableOpacity>
-
-      {/* ================= 诊断（二级页面） ================= */}
-      <TouchableOpacity style={styles.card} onPress={onOpenDiagnostics}>
-        <View style={styles.row}>
-          <View style={styles.rowMain}>
-            <Text style={font.body}>连接诊断</Text>
-            <Text style={font.faint}>最近的连接事件时间线，反馈问题时可导出</Text>
-          </View>
-          <Text style={{color: colors.textFaint, fontSize: 18}}>›</Text>
-        </View>
-      </TouchableOpacity>
-
-      {/* ================= 法律与关于 ================= */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>法律与关于</Text>
-        {(
-          [
-            USER_AGREEMENT,
-            PRIVACY_POLICY,
-            OSS_LICENSES,
-          ] as LegalDoc[]
-        ).map(doc => (
-          <TouchableOpacity
-            key={doc.title}
-            style={styles.legalRow}
-            onPress={() => setOpenDoc(doc)}>
-            <Text style={styles.legalRowText}>{doc.title}</Text>
-            <Text style={{color: colors.textFaint, fontSize: 18}}>›</Text>
-          </TouchableOpacity>
-        ))}
-        <TouchableOpacity
-          style={styles.legalRow}
-          onPress={() => Linking.openURL(PROJECT_PAGE)}>
-          <Text style={styles.legalRowText}>项目主页（GitHub）</Text>
-          <Text style={{color: colors.textFaint, fontSize: 18}}>›</Text>
-        </TouchableOpacity>
-        <Text style={[font.faint, {marginTop: 8, textAlign: 'center'}]}>
-          KShell · 非官方第三方客户端 · 零数据收集
-        </Text>
-      </View>
+      </ScrollView>
 
       <LegalDocModal doc={visible ? openDoc : null} onClose={() => setOpenDoc(null)} />
 
@@ -1269,42 +728,40 @@ export function SettingsScreen({
         visible={visible && backupBlob != null}
         animationType="slide"
         onRequestClose={() => setBackupBlob(null)}>
-        <View style={styles.notesRoot}>
-          <View style={styles.notesTopBar}>
-            <TouchableOpacity
-              onPress={() => setBackupBlob(null)}
-              style={styles.backButton}>
-              <Text style={{color: colors.accent, fontSize: 16}}>‹ 完成</Text>
-            </TouchableOpacity>
-            <Text style={font.body}>配对备份</Text>
-            <View style={{width: 64}} />
-          </View>
+        <View style={styles.root}>
+          <PageHeader
+            title="配对备份"
+            onBack={() => setBackupBlob(null)}
+            backLabel="完成"
+          />
           <ScrollView contentContainerStyle={{padding: 20, gap: 14}}>
             <Text style={font.faint}>
               这段文本包含全部配对记录（已用口令加密）。保存到你的收藏、网盘或
               备忘录均可；口令和文本缺一不可，口令丢失无法找回。
             </Text>
-            <Text style={styles.blobText} selectable>
-              {backupBlob}
-            </Text>
+            <View style={styles.blobBox}>
+              <Text style={styles.blobText} selectable>
+                {backupBlob}
+              </Text>
+            </View>
             <View style={{flexDirection: 'row', gap: 10}}>
               <TouchableOpacity
-                style={styles.rowButton}
+                style={styles.modalButton}
                 onPress={() => {
                   if (backupBlob != null) {
                     Clipboard.setString(backupBlob);
                   }
                 }}>
-                <Text style={styles.rowButtonText}>复制文本</Text>
+                <Text style={styles.modalButtonText}>复制文本</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.rowButton}
+                style={styles.modalButton}
                 onPress={() => {
                   if (backupBlob != null) {
                     shareTextFile('zshell-backup.txt', backupBlob).catch(() => {});
                   }
                 }}>
-                <Text style={styles.rowButtonText}>保存 / 分享为文件</Text>
+                <Text style={styles.modalButtonText}>保存 / 分享为文件</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -1316,131 +773,78 @@ export function SettingsScreen({
         visible={visible && notesRelease != null}
         animationType="slide"
         onRequestClose={() => setNotesRelease(null)}>
-        <View style={styles.notesRoot}>
-          <View style={styles.notesTopBar}>
-            <TouchableOpacity
-              onPress={() => setNotesRelease(null)}
-              style={styles.backButton}>
-              <Text style={{color: colors.accent, fontSize: 16}}>‹ 返回</Text>
-            </TouchableOpacity>
-            <Text style={font.body}>v{notesRelease?.version} 更新说明</Text>
-            <View style={{width: 64}} />
-          </View>
+        <View style={styles.root}>
+          <PageHeader
+            title={`v${notesRelease?.version ?? ''} 更新说明`}
+            onBack={() => setNotesRelease(null)}
+          />
           <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 40}}>
             <MarkdownText text={notesRelease?.notes ?? ''} />
           </ScrollView>
         </View>
       </Modal>
-    </ScrollView>
+    </View>
   );
 }
 
-const useStyles = makeStyles((colors, font) => ({
+const useStyles = makeStyles(colors => ({
   root: {flex: 1, backgroundColor: colors.bg},
-  pageTitle: {...font.title, marginBottom: 2},
+  scroll: {flex: 1},
+  content: {padding: 16, gap: 14, paddingBottom: 32},
   card: {
     backgroundColor: colors.bgElevated,
     borderRadius: radius.l,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     gap: 8,
   },
   cardTitle: {
-    color: colors.textFaint,
-    fontSize: 12,
+    color: colors.textDim,
+    fontSize: 13,
     fontWeight: '600',
-    letterSpacing: 1,
     marginBottom: 2,
   },
   segment: {
     flexDirection: 'row',
-    backgroundColor: colors.bgInput,
-    borderRadius: 10,
-    padding: 3,
+    backgroundColor: colors.bgSunken,
+    borderRadius: radius.s,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    padding: 4,
   },
   segmentItem: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingVertical: 9,
+    borderRadius: radius.s,
   },
   segmentItemActive: {
+    backgroundColor: colors.pillActive,
+  },
+  segmentText: {color: colors.textDim, fontSize: 14, fontWeight: '500'},
+  segmentTextActive: {color: colors.text, fontWeight: '600'},
+  blobBox: {
     backgroundColor: colors.bgElevated,
-    elevation: 1,
-  },
-  segmentText: {color: colors.textDim, fontSize: 14},
-  segmentTextActive: {color: colors.accent, fontWeight: '600'},
-  row: {flexDirection: 'row', alignItems: 'center', gap: 10},
-  rowMain: {flex: 1, gap: 2},
-  rowButton: {
-    backgroundColor: colors.bgInput,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'transparent',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  rowButtonActive: {borderColor: colors.accent, backgroundColor: colors.accentSoft},
-  rowButtonArmed: {backgroundColor: colors.dangerArmed},
-  rowButtonText: {color: colors.textDim, fontSize: 13},
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.border,
-    marginVertical: 4,
-  },
-  hintWarn: {color: colors.star, fontSize: 12},
-  input: {
-    backgroundColor: colors.bgInput,
-    borderRadius: 10,
+    borderRadius: radius.l,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: colors.text,
-    fontSize: 15,
+    padding: 14,
   },
-  primaryButton: {
-    backgroundColor: colors.accent,
-    borderRadius: radius.m,
-    paddingVertical: 13,
-    alignItems: 'center',
-  },
-  primaryButtonText: {color: colors.onAccent, fontWeight: '600'},
-  track: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.bgInput,
-    overflow: 'hidden',
-  },
-  fill: {height: 4, borderRadius: 2, backgroundColor: colors.accent},
-  errorText: {color: colors.danger, fontSize: 13},
-  legalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.bgInput,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    marginTop: 4,
-  },
-  legalRowText: {color: colors.accent, fontSize: 15},
-  notesRoot: {flex: 1, backgroundColor: colors.bg},
-  backButton: {paddingHorizontal: 10, paddingVertical: 8},
   blobText: {
     color: colors.textDim,
     fontSize: 10,
-    lineHeight: 14,
+    lineHeight: 15,
     fontFamily: 'monospace',
   },
-  notesTopBar: {
-    height: 52,
-    backgroundColor: colors.bgElevated,
-    flexDirection: 'row',
+  modalButton: {
+    flex: 1,
+    backgroundColor: colors.bgInput,
+    borderRadius: radius.s,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     alignItems: 'center',
-    paddingHorizontal: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
   },
+  modalButtonText: {color: colors.text, fontSize: 14, fontWeight: '500'},
 }));

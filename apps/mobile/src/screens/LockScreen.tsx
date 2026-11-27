@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import {activeSecrets, LockConfig, patternToString, recordLockFailure} from '@zshell/core-shell';
 import {biometricAuth} from '../biometric';
+import {Icon} from '../components/Icon';
 import {SecretInput} from '../components/SecretInput';
 import {verifySecretAsync} from '../securekdf';
 import {PatternPad} from '../PatternPad';
@@ -45,7 +46,7 @@ export function biometricLabel(type?: string): string {
  * remains one tap away — one unavailable method never locks the user out.
  */
 export function LockScreen({config, onUnlock}: LockScreenProps) {
-  const {font} = useTheme();
+  const {colors, font} = useTheme();
   const styles = useStyles();
   const secrets = activeSecrets(config);
   const [mode, setMode] = useState<Mode>(
@@ -183,7 +184,7 @@ export function LockScreen({config, onUnlock}: LockScreenProps) {
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled">
       <View style={styles.lockBadge}>
-        <Text style={styles.lockGlyph}>🔒</Text>
+        <Icon name="lock" size={28} color={colors.accent} />
       </View>
       <Text style={styles.title}>KShell 已锁定</Text>
       <Text style={font.dim}>
@@ -298,22 +299,21 @@ const useStyles = makeStyles((colors, font) => ({
   lockBadge: {
     width: 72,
     height: 72,
-    borderRadius: 36,
-    backgroundColor: colors.accentSoft,
+    borderRadius: 22,
+    backgroundColor: colors.iconBadgeBg,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
   },
-  lockGlyph: {fontSize: 30},
   button: {
     backgroundColor: colors.accent,
-    borderRadius: radius.m,
+    borderRadius: radius.s,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 16,
     paddingHorizontal: 40,
   },
-  buttonText: {color: colors.onAccent, fontSize: 16, fontWeight: '600'},
+  buttonText: {color: colors.onAccent, fontSize: 15, fontWeight: '600'},
   switchRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

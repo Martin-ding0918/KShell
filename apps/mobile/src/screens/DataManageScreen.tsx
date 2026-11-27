@@ -8,6 +8,7 @@ import {
   STORAGE_KEYS,
 } from '@zshell/core-shell';
 import {DonutChart, DonutSegment} from '../components/DonutChart';
+import {PageHeader} from '../components/PageHeader';
 import {cleanupInstalledApks, queryDownloads, removeDownload} from '../downloads';
 import {clearDiag, diagSize} from '../diagnostics';
 import {secureStore} from '../storage';
@@ -160,11 +161,9 @@ export function DataManageScreen({machines, lock, onBack, onSignOutWebLogin}: Da
   const clearableRows = (categories ?? []).filter(c => !c.protectedData);
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={{padding: 16, gap: 14}}>
-      <TouchableOpacity onPress={onBack} style={{paddingVertical: 4}}>
-        <Text style={{color: colors.accent, fontSize: 16}}>‹ 返回设置</Text>
-      </TouchableOpacity>
-      <Text style={styles.pageTitle}>数据管理</Text>
+    <View style={styles.root}>
+      <PageHeader title="数据管理" onBack={onBack} backLabel="返回设置" />
+      <ScrollView style={styles.scroll} contentContainerStyle={{padding: 16, gap: 14}}>
       <Text style={font.faint}>
         本机数据占用一览。缓存类数据可在这里清理；安全配置受保护，不提供
         清理入口
@@ -272,13 +271,14 @@ export function DataManageScreen({machines, lock, onBack, onSignOutWebLogin}: Da
       <Text style={[font.faint, {textAlign: 'center', marginTop: 4}]}>
         KShell 零数据收集：以上数据全部只存在本机，不上传任何服务器
       </Text>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
-const useStyles = makeStyles((colors, font) => ({
+const useStyles = makeStyles(colors => ({
   root: {flex: 1, backgroundColor: colors.bg},
-  pageTitle: {...font.title, marginBottom: 2},
+  scroll: {flex: 1},
   card: {
     backgroundColor: colors.bgElevated,
     borderRadius: radius.l,
