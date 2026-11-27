@@ -3,6 +3,19 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 记录格式，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。Alpha 阶段 API 与存储格式可能调整。
 
+## [0.1.0] - 2026-11-27
+
+### 变更
+- 移动端界面按现代极简工具风重构：新增统一组件体系（PageHeader、ListRow、Icon、BottomSheet、AnimatedScreen），设置页拆分为独立面板，机器列表、扫码、手动输入与同意门等页面统一视觉、间距与转场动效。
+- 控制台增强：Kimi / ZCode 顶栏胶囊与线性 SVG 图标菜单统一；Kimi 断线或被顶下线时支持一键重连；两个控制台菜单新增「切换机器」底部抽屉，多机保活间一键直达且不向网页暴露机器名。
+- 顶栏兜底与可观测性：Kimi 首绘后顶栏超时未挂载会自动浮出原生胶囊并记录 `kimi-topbar-fallback`；ZCode 聊天页行锚点缺失时上报 `zcode-topbar-miss`，诊断页补齐中文事件名。
+- 动态主题同步：保活 Kimi 网页尊重页内手动主题并通过 `__zshellUpdateKimiTheme` 更新；ZCode 监听 `prefers-color-scheme` 并提供 `__zshellSyncZcodeSkin` 刷新菜单肤色。
+- 授权登录页统一：新增后退按钮与 2px 顶部加载进度条，加载遮罩、失败卡片与兜底底栏统一风格。
+- 测试：Kimi / ZCode 真实 Chromium 顶栏回归通过，补充 ConsoleScreen 兜底、切机抽屉与授权页后退的 Jest 用例。
+
+### 其他
+- 隐私政策、用户协议与免责声明的适用版本更新至 0.1.0。
+
 ## [0.0.4] - 2026-11-27
 
 ### 修复
