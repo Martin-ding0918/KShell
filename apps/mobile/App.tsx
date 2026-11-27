@@ -7,6 +7,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {AppState, BackHandler, StyleSheet, StatusBar, View} from 'react-native';
 import {
   disabledConfig,
+  hostKindOf,
   isNewer,
   LockConfig,
   MachineLoginState,
@@ -14,7 +15,7 @@ import {
   MachineRegistry,
 } from '@zshell/core-shell';
 import {AnimatedScreen} from './src/components/AnimatedScreen';
-import {ConsoleScreen} from './src/screens/ConsoleScreen';
+import {ConsoleScreen, ConsoleSwitchTarget} from './src/screens/ConsoleScreen';
 import {ConsentGate} from './src/screens/ConsentGate';
 import {DataManageScreen} from './src/screens/DataManageScreen';
 import {DiagnosticsScreen} from './src/screens/DiagnosticsScreen';
@@ -127,6 +128,16 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
     }
     return out;
   }, [consoleSessions, machines]);
+
+  const switchTargets = useMemo<ConsoleSwitchTarget[]>(() => {
+    const active = new Set(consoleSessions);
+    return machines.map(m => ({
+      id: m.id,
+      name: m.name,
+      active: active.has(m.id),
+      kind: hostKindOf(m.credentials) === 'kimi' ? 'kimi' : 'zcode',
+    }));
+  }, [machines, consoleSessions]);
 
   const ensureRegistryLoaded = useCallback(() => {
     if (registryRef.current == null) {
@@ -537,6 +548,8 @@ function AppContent({themeMode, onChangeThemeMode}: AppContentProps): React.JSX.
                 }
                 onOpenDownloads={openDownloads}
                 onLoginState={handleConsoleLoginState}
+                switchTargets={switchTargets}
+                onSwitchMachine={connectTo}
               />
             </View>
           );

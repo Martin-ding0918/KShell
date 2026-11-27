@@ -17,23 +17,13 @@ export function shouldShowZcodeFooter(_page: ZcodePage, _status: ConsoleStatus, 
 // The title group stays left; the sidebar is pinned to the right edge
 // (margin-inline-start:auto). The status pill is the single menu entry (same
 // interaction as the Kimi topbar): tapping it toggles the floating menu
-// (返回列表 / 所有会话 / 下载管理 / 重新加载 / 会话操作 / 工作区信息 / 主题),
-// while a dead connection turns the tap into a direct 重连. The page's own
-// back-home arrow is hidden in place — in the common flow it duplicates the
-// shell ‹ web-back — and the menu carries a "所有会话" item that forwards to
-// it, so the task list stays reachable even without web history.
+// (返回列表 / 切换机器 / 所有会话 / 下载管理 / 重新加载 / 会话操作 / 工作区信息 / 主题),
+// while a dead connection turns the tap into a direct 重连.
 //
 // Anchors are stable product attributes only (`data-mobile-page`,
-// `data-testid`), never button text or coordinates. The workspace header row
-// collapses to a zero-height invisible box (not display:none) so Radix
-// dropdowns forwarded from the ⋯ menu still anchor next to the row; the theme
-// menu trigger collapses the same way inside the row.
-// Any missed anchor restores the original layout (forget()) and announces
-// header-off. The task home reports 'zshell:zcode-home'. Outside both views,
-// the native footer is reserved for page load failures, never startup or relay status.
-//
-// The same script is injected twice (`beforeContentLoaded` and after load);
-// the second run reuses the first observer through `__zshellRefreshZcodeTopbar`.
+// `data-testid`), never button text or coordinates. Any missed anchor restores
+// the original layout (forget()), announces header-off, and reports a compact
+// diagnostic anchor name so upstream page changes are easy to pinpoint.
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 
 export function buildZcodeTopbarPatch(
@@ -77,46 +67,49 @@ export function buildZcodeTopbarPatch(
       'html.dark[data-zshell-zcode-topbar] ' + chatSection + ' > [data-zshell-zc-row]{background-color:${dark.consoleHeaderBg};background-color:light-dark(${light.consoleHeaderBg},${dark.consoleHeaderBg})}',
       // The page's own h-11 mobile header row becomes the single 48px row.
       '[data-zshell-zc-row]{position:relative;justify-content:flex-start;gap:4px;padding:0 8px 0 12px!important;height:48px!important;min-height:48px!important;max-height:48px!important;overflow:hidden}',
-      // Static "task console" caption and the original back-home arrow (it
-      // duplicates the shell ‹ web-back in the common flow; the ⋯ menu
-      // forwards to it so the task list stays reachable) are hidden in place.
       '[data-zshell-zc-row] > [data-zshell-zc-hide]{display:none!important}',
-      // Theme menu trigger collapses in place: absolutely positioned at the
-      // row's right edge so it neither takes part in flex layout (no phantom
-      // gap) nor shifts the sidebar, while its Radix dropdown still anchors
-      // beside the row when forwarded from the menu.
       '[data-zshell-zc-row] > [data-zshell-zc-themebtn]{order:9;position:absolute;right:0;top:0;height:100%;width:0!important;min-width:0!important;padding:0!important;margin:0!important;border:0!important;overflow:hidden;visibility:hidden}',
-      // Shell controls, in visual order. Sidebar pins to the right edge.
       '[data-zshell-zc-row] > [data-zshell-zc-back]{order:0}',
       '[data-zshell-zc-row] > [data-zshell-zc-title]{order:1;flex:0 1 auto;min-width:0;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit}',
       '[data-zshell-zc-row] > .zshell-status{order:2}',
       '[data-zshell-zc-row] > [data-zshell-zc-sidebar]{order:5;margin-inline-start:auto!important}',
       '[data-zshell-zc-back],[data-zshell-zc-sidebar]{flex:none;display:flex;align-items:center;justify-content:center;width:34px;height:40px;margin:0;padding:0;border:0;background:transparent;color:inherit;cursor:pointer}',
       '[data-zshell-zc-back][data-zshell-zc-nav-dead]{opacity:.35}',
-      // Connection pill (single menu entry), fed natively through
-      // __zshellUpdateZcodeStatus.
-      '.zshell-status{flex:none;display:flex;align-items:center;gap:4px;height:30px;margin:0;padding:0 8px;border:1px solid rgba(127,127,127,.35);border-radius:999px;background:rgba(127,127,127,.08);color:inherit;font:inherit;font-size:11px;white-space:nowrap;cursor:pointer}',
-      '.zshell-status i{width:6px;height:6px;border-radius:50%;flex:none;background:var(--zshell-dot,#888)}',
-      // The page's workspace header row collapses to a zero-height invisible
-      // box that keeps its geometry, so forwarded Radix dropdowns and the
-      // workspace popover anchor next to our row instead of the viewport origin.
+      // Plan A soft-filled connection pill (single menu entry).
+      '.zshell-status{flex:none;display:flex;align-items:center;gap:5px;height:28px;margin:0;padding:0 10px;border:0;border-radius:999px;background:rgba(127,127,127,.13);color:inherit;font:inherit;font-size:11px;font-weight:600;white-space:nowrap;cursor:pointer;transition:background-color .15s}',
+      '.zshell-status[data-zshell-reconnect]{background:rgba(248,113,113,.16);color:#f87171}',
+      '.zshell-status i{width:7px;height:7px;border-radius:50%;flex:none;background:var(--zshell-dot,#888)}',
       'html[data-zshell-zcode-topbar] header[data-testid="workspace-header"]{height:0!important;min-height:0!important;max-height:0!important;overflow:hidden!important;border-bottom-width:0!important;visibility:hidden!important}',
-      // Floating menu (⋯).
-      '.zshell-menu{position:fixed;top:52px;right:8px;z-index:2147483000;display:flex;flex-direction:column;min-width:148px;padding:5px;border:1px solid rgba(127,127,127,.35);border-radius:12px;background:var(--zshell-zc-bg,#fff);box-shadow:0 10px 28px rgba(0,0,0,.2);font:inherit;color:var(--zshell-zc-fg,#111)}',
-      '.zshell-menu button{all:unset;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:9px 10px;border-radius:8px;font-size:13px;cursor:pointer;color:inherit}',
+      // Plan A floating menu.
+      '.zshell-menu{position:fixed;top:52px;right:10px;z-index:2147483000;display:flex;flex-direction:column;min-width:184px;padding:6px;border:1px solid rgba(127,127,127,.22);border-radius:16px;background:var(--zshell-zc-bg,#fff);box-shadow:0 12px 32px rgba(0,0,0,.26);font:inherit;color:var(--zshell-zc-fg,#111);gap:2px}',
+      '.zshell-menu button{all:unset;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px;border-radius:11px;font-size:13px;font-weight:500;cursor:pointer;color:inherit}',
       '.zshell-menu button:active{background:rgba(127,127,127,.16)}',
-      '.zshell-menu small{font-size:11px;opacity:.55}',
-      '@media(max-width:310px){[data-zshell-zc-row] > .zshell-status{padding-inline:5px}[data-zshell-zc-row] > .zshell-status span{display:none}}'
+      '.zshell-menu .zm-left{display:flex;align-items:center;gap:9px}',
+      '.zshell-menu svg{flex:none;opacity:.75}',
+      '.zshell-menu small{font-size:11px;opacity:.52;font-weight:400}',
+      '.zshell-menu .zm-div{height:1px;background:rgba(127,127,127,.18);margin:4px 6px}',
+      '@media(max-width:310px){[data-zshell-zc-row] > .zshell-status{padding-inline:6px}[data-zshell-zc-row] > .zshell-status span{display:none}}'
     ].join('\n');
     var active = null, row = null, back = null, title = null, dot = null, label = null,
         sidebar = null, staticTitle = null, themeBtn = null, homeBtn = null,
-        menu = null, current = null, navDead = false, pageState = null, lastSkinKey = '';
+        menu = null, current = null, navDead = false, pageState = null, lastSkinKey = '',
+        lastReportedMiss = '';
     var ICON_BACK = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10.5 3 5.5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     var ICON_SIDEBAR = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="10" y1="2.5" x2="10" y2="13.5" stroke="currentColor" stroke-width="1.4"/></svg>';
+    var ICO_BACK = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5 5.5 8 10 12.5"/></svg>';
+    var ICO_SWITCH = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="9" rx="2"/><path d="M5.5 7 7 8.5 5.5 10"/><path d="M8.5 10h2"/></svg>';
+    var ICO_LIST = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 4.5h10M3 8h10M3 11.5h7"/></svg>';
+    var ICO_DL = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7.5m0 0-3-3m3 3 3-3"/><path d="M3 12.5h10"/></svg>';
+    var ICO_RELOAD = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.3-3.4"/><path d="M13 3v2.5h-2.5"/></svg>';
+    var ICO_MORE = '<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><circle cx="3.5" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/></svg>';
+    var ICO_FOLDER = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.3 1.5h4.7A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/></svg>';
+    var ICO_THEME = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5"/><path d="M8 3v10" stroke-width="1.3"/></svg>';
     var render = function () {
       if (!dot || !current) return;
       dot.style.setProperty('--zshell-dot', current.color);
       if (label && label.textContent !== current.short) label.textContent = current.short;
+      if (current.reconnect) dot.setAttribute('data-zshell-reconnect', '');
+      else dot.removeAttribute('data-zshell-reconnect');
       dot.setAttribute('aria-label', current.label + ' · KShell');
       dot.title = current.label;
     };
@@ -141,9 +134,16 @@ export function buildZcodeTopbarPatch(
         if (root.getPropertyValue('--zshell-zc-fg') !== fg) root.setProperty('--zshell-zc-fg', fg);
       } catch (_) { /* cosmetic only */ }
     };
+    window.__zshellSyncZcodeSkin = function () { applySkin(true); };
+    try {
+      if (typeof window.matchMedia === 'function') {
+        var mq = window.matchMedia('(prefers-color-scheme: dark)');
+        if (mq && typeof mq.addEventListener === 'function') {
+          mq.addEventListener('change', function () { applySkin(true); });
+        }
+      }
+    } catch (_) {}
     var dismissMenu = function (e) {
-      // The pill must stay excluded — it toggles the menu, and its
-      // capture-phase dismissal would race its own toggle handler.
       if (menu && !menu.contains(e.target) && !dot.contains(e.target)) closeMenu();
     };
     var closeMenu = function () {
@@ -151,8 +151,6 @@ export function buildZcodeTopbarPatch(
       menu = null;
       document.removeEventListener('click', dismissMenu, true);
     };
-    // Radix dropdown triggers open on pointerdown; a plain .click() is not
-    // enough. Element-level dispatch only — never coordinates.
     var forwardMenu = function (el) {
       if (!el || !el.isConnected) return false;
       try {
@@ -174,19 +172,26 @@ export function buildZcodeTopbarPatch(
     };
     var openMenu = function () {
       closeMenu();
+      applySkin(true);
       var m = document.createElement('div');
       m.className = 'zshell-menu';
       m.setAttribute('role', 'menu');
-      var item = function (text, hint, fn) {
+      var item = function (icon, text, hint, fn) {
         var b = document.createElement('button');
         b.type = 'button';
         b.setAttribute('role', 'menuitem');
+        var left = document.createElement('span');
+        left.className = 'zm-left';
+        left.innerHTML = icon;
         var t = document.createElement('span');
         t.textContent = text;
-        var h = document.createElement('small');
-        h.textContent = hint;
-        b.appendChild(t);
-        b.appendChild(h);
+        left.appendChild(t);
+        b.appendChild(left);
+        if (hint) {
+          var h = document.createElement('small');
+          h.textContent = hint;
+          b.appendChild(h);
+        }
         b.addEventListener('click', function (e) {
           e.stopPropagation();
           closeMenu();
@@ -194,17 +199,27 @@ export function buildZcodeTopbarPatch(
         });
         m.appendChild(b);
       };
-      item('返回列表', '结束当前视图', function () { post('zshell:zcode-back'); });
-      if (homeBtn && homeBtn.isConnected) {
-        item('所有会话', '打开任务列表', function () { homeBtn.click(); });
+      var divider = function () {
+        var d = document.createElement('div');
+        d.className = 'zm-div';
+        m.appendChild(d);
+      };
+      item(ICO_BACK, '返回列表', '保持后台', function () { post('zshell:zcode-back'); });
+      if (current && current.canSwitch) {
+        item(ICO_SWITCH, '切换机器', '', function () { post('zshell:zcode-switch'); });
       }
-      item('下载管理', '', function () { post('zshell:zcode-downloads'); });
-      item('重新加载', '', function () { post('zshell:zcode-reload'); });
+      if (homeBtn && homeBtn.isConnected) {
+        item(ICO_LIST, '所有会话', '任务列表', function () { homeBtn.click(); });
+      }
+      item(ICO_DL, '下载管理', '', function () { post('zshell:zcode-downloads'); });
+      item(ICO_RELOAD, '重新加载', '', function () { post('zshell:zcode-reload'); });
       var moreBtn = document.querySelector(wsMore);
-      if (moreBtn) item('会话操作', '原页面菜单', function () { forwardMenu(moreBtn); });
       var pathBtn = document.querySelector(wsPath);
-      if (pathBtn) item('工作区信息', '', function () { pathBtn.click(); });
-      if (themeBtn && themeBtn.isConnected) item('主题', '浅色 / 深色', function () { forwardMenu(themeBtn); });
+      var hasTheme = themeBtn && themeBtn.isConnected;
+      if (moreBtn || pathBtn || hasTheme) divider();
+      if (moreBtn) item(ICO_MORE, '会话操作', '原菜单', function () { forwardMenu(moreBtn); });
+      if (pathBtn) item(ICO_FOLDER, '工作区信息', '', function () { pathBtn.click(); });
+      if (hasTheme) item(ICO_THEME, '主题', '浅色 / 深色', function () { forwardMenu(themeBtn); });
       document.body.appendChild(m);
       menu = m;
       document.addEventListener('click', dismissMenu, true);
@@ -241,10 +256,6 @@ export function buildZcodeTopbarPatch(
       if (title.textContent !== text) title.textContent = text;
       title.hidden = text === '';
     };
-    // The chat section's first element child is the page's own mobile header
-    // row: [back-home button, static title span, theme menu trigger]. Radix
-    // renders no wrapper around the theme trigger, so the shape is exact.
-    // Our own nodes carry data-zshell-zc and are excluded from the match.
     var findRow = function (section) {
       var candidate = section.firstElementChild;
       if (!candidate || candidate.tagName !== 'DIV') return null;
@@ -284,9 +295,10 @@ export function buildZcodeTopbarPatch(
           (document.head || document.documentElement).appendChild(style);
         }
         if (!section || !parts) {
-          // Off the chat page: the task home paints its own chrome, so the
-          // shell hides the native footer there too ('zshell:zcode-home').
-          // Other views let the shell decide whether a failure needs controls.
+          if (section && !parts && lastReportedMiss !== 'row') {
+            lastReportedMiss = 'row';
+            post('zshell:zcode-topbar-miss:row');
+          }
           var state = document.querySelector('section[data-mobile-page="home"]')
             ? 'home' : 'other';
           if (active) forget();
@@ -296,11 +308,11 @@ export function buildZcodeTopbarPatch(
           }
           return;
         }
+        lastReportedMiss = '';
         pageState = 'chat';
         if (active === parts.row && back && back.parentNode === parts.row &&
             homeBtn === parts.home && staticTitle === parts.staticTitle &&
             (themeBtn || null) === (parts.theme || null)) {
-          // Same row: refresh derived bits, no rebuild.
           staticTitle.setAttribute('data-zshell-zc-hide', '');
           homeBtn.setAttribute('data-zshell-zc-hide', '');
           if (themeBtn) themeBtn.setAttribute('data-zshell-zc-themebtn', '');

@@ -36,6 +36,10 @@ const LABELS: Record<string, string> = {
   'basic-auth-reload': '保存口令后重连',
   'window-open': '打开授权页',
   'login-observed': '登录状态观测',
+  'first-paint': '控制台首绘完成',
+  'kimi-theme-pin': 'Kimi 首屏主题锁定',
+  'kimi-topbar-fallback': 'Kimi 顶栏降级兜底',
+  'zcode-topbar-miss': 'ZCode 顶栏锚点缺失',
 };
 
 function timeText(t: number): string {

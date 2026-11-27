@@ -567,3 +567,124 @@ test('MachineListScreen shows active session indicator, opens management BottomS
     await ReactTestRenderer.act(async () => renderer.unmount());
   }
 });
+
+test('ConsoleScreen surfaces Kimi topbar fallback, opens machine switcher, and supports auth back/progress', async () => {
+  jest.useFakeTimers({doNotFake: ['setImmediate', 'clearImmediate']});
+  const {AppState} = require('react-native');
+  const {WebView} = require('react-native-webview');
+  const {ConsoleScreen} = require('../src/screens/ConsoleScreen');
+  const prevAppState = AppState.currentState;
+  AppState.currentState = 'active';
+  const onSwitchMachine = jest.fn();
+
+  const machine = {
+    id: 'm1',
+    name: 'Kimi Office',
+    credentials: {
+      kind: 'kimi' as const,
+      sid: 'dev-abc',
+      hash: '',
+      origin: 'https://code-rc.kimi.com',
+      mid: null,
+      deviceName: null,
+      appVersion: null,
+      issuedAt: null,
+      source: 'kimi_code_desktop',
+      extraQuery: 'rc=1',
+    },
+    favorite: false,
+    sortOrder: 1,
+    createdAt: 1,
+    lastUsedAt: null,
+  };
+  const targets = [
+    {id: 'm1', name: 'Kimi Office', active: true, kind: 'kimi' as const},
+    {id: 'm2', name: 'ZCode Home', active: true, kind: 'zcode' as const},
+  ];
+
+  let renderer!: ReturnType<typeof ReactTestRenderer.create>;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(
+      <ThemeProvider scheme="dark">
+        <ConsoleScreen
+          machine={machine}
+          foreground={true}
+          onBack={() => {}}
+          registerBackHandler={() => {}}
+          onOpenDownloads={() => {}}
+          switchTargets={targets}
+          onSwitchMachine={onSwitchMachine}
+        />
+      </ThemeProvider>,
+    );
+  });
+
+  try {
+    const textOf = (t: {props: {children?: unknown}}) =>
+      Array.isArray(t.props.children)
+        ? t.props.children.map(String).join('')
+        : String(t.props.children ?? '');
+
+    const mainWebView = renderer.root.findAllByType(WebView)[0];
+
+    // 1. First paint succeeds but Kimi topbar never attaches -> fallback statusPill appears after 3.5s.
+    await ReactTestRenderer.act(async () => {
+      mainWebView.props.onMessage({
+        nativeEvent: {data: 'zshell:first-paint', url: 'https://code-rc.kimi.com/devices/dev-abc/'},
+      });
+    });
+    await ReactTestRenderer.act(async () => {
+      jest.advanceTimersByTime(3600);
+    });
+    expect(
+      renderer.root.findAllByType(TouchableOpacity).some(b =>
+        typeof b.props.accessibilityLabel === 'string' &&
+        b.props.accessibilityLabel.includes('展开控制台操作'),
+      ),
+    ).toBe(true);
+
+    // 2. Machine switcher bridge opens BottomSheet and switches to m2.
+    await ReactTestRenderer.act(async () => {
+      mainWebView.props.onMessage({
+        nativeEvent: {data: 'zshell:kimi-switch', url: 'https://code-rc.kimi.com/devices/dev-abc/'},
+      });
+    });
+    expect(renderer.root.findByType(Modal).props.visible).toBe(true);
+    const targetBtn = renderer.root.findAllByType(TouchableOpacity).find(btn =>
+      btn.findAllByType(Text).some(t => textOf(t) === 'ZCode Home'),
+    );
+    expect(targetBtn).toBeDefined();
+    await ReactTestRenderer.act(async () => {
+      targetBtn!.props.onPress();
+    });
+    expect(onSwitchMachine).toHaveBeenCalledWith('m2');
+    expect(renderer.root.findByType(Modal).props.visible).toBe(false);
+
+    // 3. Auth overlay renders back button enabled when canGoBack becomes true.
+    await ReactTestRenderer.act(async () => {
+      mainWebView.props.onOpenWindow({
+        nativeEvent: {targetUrl: 'https://auth.kimi.ai/oauth/start'},
+      });
+    });
+    const authWebView = renderer.root.findAllByType(WebView)[1];
+    const authBackBefore = renderer.root.findAllByType(TouchableOpacity).find(btn =>
+      btn.props.accessibilityLabel === '授权页返回上一页',
+    );
+    expect(authBackBefore?.props.disabled).toBe(true);
+
+    await ReactTestRenderer.act(async () => {
+      authWebView.props.onNavigationStateChange({
+        url: 'https://accounts.google.com/o/oauth2/auth',
+        canGoBack: true,
+      });
+    });
+    const authBackAfter = renderer.root.findAllByType(TouchableOpacity).find(btn =>
+      btn.props.accessibilityLabel === '授权页返回上一页',
+    );
+    expect(authBackAfter?.props.disabled).toBe(false);
+  } finally {
+    await ReactTestRenderer.act(async () => renderer.unmount());
+    jest.useRealTimers();
+    AppState.currentState = prevAppState;
+  }
+});

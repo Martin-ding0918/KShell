@@ -39,6 +39,8 @@ import {buildKimiThemePrelude, KIMI_TOPBAR_PATCH} from '../kimiTopbar';
 import {buildZcodeTopbarPatch, shouldShowZcodeFooter, type ZcodePage} from '../zcodeTopbar';
 import {observeKimiLogin} from '../consoleLogin';
 import {formatConsoleAttempt, type ConsoleAttempt, type ConsoleFailure} from '../consoleAttempt';
+import {BottomSheet} from '../components/BottomSheet';
+import {Icon} from '../components/Icon';
 import {logDiag} from '../diagnostics';
 import {openInBrowser} from '../downloads';
 import {loadPrefs, notifications} from '../notifications';
@@ -136,6 +138,13 @@ const ZCODE_AUTH_NAV_HOST_RE = ZCODE_MAIN_NAV_HOST_RE;
 const MAX_RENDERER_AUTO_RECOVERIES = 2;
 const RENDERER_CRASH_WINDOW_MS = 60_000;
 
+export interface ConsoleSwitchTarget {
+  id: string;
+  name: string;
+  active: boolean;
+  kind: 'kimi' | 'zcode';
+}
+
 interface ConsoleScreenProps {
   machine: MachineRecord;
   foreground: boolean;
@@ -153,6 +162,9 @@ interface ConsoleScreenProps {
    * means signed out, staying on /devices/ means signed in).
    */
   onLoginState?: (machineId: string, state: MachineLoginState) => void;
+  /** All paired machines for quick switching from inside the console menu. */
+  switchTargets?: ReadonlyArray<ConsoleSwitchTarget>;
+  onSwitchMachine?: (machineId: string) => void;
 }
 
 /**
@@ -160,10 +172,20 @@ interface ConsoleScreenProps {
  * (matchMedia fix etc.) is injected before any page script runs; everything
  * else — relay WSS, pairing handshake — is done by the official page itself.
  */
-export function ConsoleScreen({machine, foreground, onBack, registerBackHandler, onOpenDownloads, onLoginState}: ConsoleScreenProps) {
+export function ConsoleScreen({
+  machine,
+  foreground,
+  onBack,
+  registerBackHandler,
+  onOpenDownloads,
+  onLoginState,
+  switchTargets,
+  onSwitchMachine,
+}: ConsoleScreenProps) {
   const {colors, font} = useTheme();
   const styles = useStyles();
   const webviewRef = useRef<WebView<object>>(null);
+  const authWebViewRef = useRef<WebView<object>>(null);
   const syncTopbarActivity = useCallback((active: boolean) => {
     webviewRef.current?.injectJavaScript(
       `window.__zshellTopbarActive = ${active}; window.__zshellSetTopbarActive?.(${active}); true;`,
@@ -196,10 +218,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   const webSource = useMemo(() => ({uri: url}), [url]);
   // 原生遮罩：盖住 WebView 表面，直到真实页面提交首帧。实测（小米 17，
   // 录屏逐帧 + logcat）从 WebView 创建到首帧绘制之间（慢隧道下 6~10s），
-  // 表面一直显示初始白色缓冲；0.0.1.23 的 warm-up 页方案依赖"已绘制帧
-  // 跨导航保留"，在默认渲染后端下不成立（验收通过时设备残留强制 GL 实验
-  // 旗标），还会把 data: 页留在 WebView 历史里（侧滑返回多出白色中间页）。
-  // 原生遮罩由 App 进程合成，与 WebView 后端无关；首帧信号或 15s 兜底后撤除。
+  // 表面一直显示初始白色缓冲；原生遮罩由 App 进程合成，首帧信号或 15s 兜底后撤除。
   const [cover, setCover] = useState<
     'opening' | 'reloading' | 'load-timeout' | 'reload-timeout' | 'hidden'
   >('opening');
@@ -217,8 +236,45 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   const isZcode = hostKindOf(machine.credentials) === 'zcode';
   const [needsLogin, setNeedsLogin] = useState(false);
   const [kimiHeaderReady, setKimiHeaderReady] = useState(false);
+  const [kimiHeaderFallback, setKimiHeaderFallback] = useState(false);
   const [zcodePage, setZcodePage] = useState<ZcodePage>('other');
   const [controlsVisible, setControlsVisible] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const canSwitch = onSwitchMachine != null && (switchTargets?.length ?? 0) > 1;
+
+  // Fallback watchdog: if Kimi ever ships new topbar class names and the
+  // injected pill never attaches after first-paint, surface the native
+  // statusPill so downloads/reload/back remain reachable and log diagnostics.
+  useEffect(() => {
+    if (!isKimi || kimiHeaderReady || cover !== 'hidden' || loadFailed || needsLogin) {
+      if (kimiHeaderReady) setKimiHeaderFallback(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setKimiHeaderFallback(true);
+      logDiag('kimi-topbar-fallback');
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [isKimi, kimiHeaderReady, cover, loadFailed, needsLogin]);
+
+  // Close the switcher sheet whenever this console leaves the foreground.
+  useEffect(() => {
+    if (!foreground) {
+      setSwitcherOpen(false);
+    }
+  }, [foreground]);
+
+  // Push live theme changes to already-mounted keep-alive WebViews.
+  useEffect(() => {
+    if (isKimi) {
+      webviewRef.current?.injectJavaScript(
+        `window.__zshellUpdateKimiTheme?.(${JSON.stringify(colors.scheme)}, ${JSON.stringify(colors.consoleBg)}); true;`,
+      );
+    } else if (isZcode) {
+      webviewRef.current?.injectJavaScript('window.__zshellSyncZcodeSkin?.(); true;');
+    }
+  }, [isKimi, isZcode, colors.scheme, colors.consoleBg]);
+
   const patchSource = useMemo(
     () =>
       (isKimi ? buildKimiThemePrelude(colors.scheme, kimiConsoleColors) : '') +
@@ -229,13 +285,25 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   );
   const statusDetails = useMemo(() => statusMeta(status, colors), [status, colors]);
   const pushKimiStatus = useCallback(() => {
-    const value = JSON.stringify({
-      short: statusDetails.short,
-      label: statusDetails.label,
-      color: statusDetails.color,
-    });
+    const reconnect = status === 'disconnected' || status === 'kicked';
+    const value = JSON.stringify(
+      reconnect
+        ? {
+            short: '重连',
+            label: `${statusDetails.label}，点按重连`,
+            color: statusDetails.color,
+            reconnect: true,
+            canSwitch,
+          }
+        : {
+            short: statusDetails.short,
+            label: statusDetails.label,
+            color: statusDetails.color,
+            canSwitch,
+          },
+    );
     webviewRef.current?.injectJavaScript(`window.__zshellUpdateKimiStatus?.(${value}); true;`);
-  }, [statusDetails]);
+  }, [status, statusDetails, canSwitch]);
   useEffect(() => {
     if (kimiHeaderReady) pushKimiStatus();
   }, [kimiHeaderReady, pushKimiStatus]);
@@ -250,15 +318,17 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
             label: `${statusDetails.label}，点按重连`,
             color: statusDetails.color,
             reconnect: true,
+            canSwitch,
           }
         : {
             short: statusDetails.short,
             label: statusDetails.label,
             color: statusDetails.color,
+            canSwitch,
           },
     );
     webviewRef.current?.injectJavaScript(`window.__zshellUpdateZcodeStatus?.(${value}); true;`);
-  }, [status, statusDetails]);
+  }, [status, statusDetails, canSwitch]);
   useEffect(() => {
     if (zcodePage === 'chat') pushZcodeStatus();
   }, [zcodePage, pushZcodeStatus]);
@@ -319,6 +389,14 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
   // 壳里永远未登录。
   const [authWindowUrl, setAuthWindowUrl] = useState<string | null>(null);
   const [authCurrentHost, setAuthCurrentHost] = useState('');
+  const [authCanGoBack, setAuthCanGoBack] = useState(false);
+  const [authLoadProgress, setAuthLoadProgress] = useState(0);
+  const closeAuthOverlay = useCallback(() => {
+    setAuthWindowUrl(null);
+    setAuthCurrentHost('');
+    setAuthCanGoBack(false);
+    setAuthLoadProgress(0);
+  }, []);
   const authWebSource = useMemo(
     () => (authWindowUrl != null ? {uri: authWindowUrl} : null),
     [authWindowUrl],
@@ -361,8 +439,12 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         if (data === 'zshell:kimi-header-on' || data === 'zshell:kimi-header-off') {
           const ready = data === 'zshell:kimi-header-on';
           setKimiHeaderReady(ready);
-          if (ready) pushKimiStatus();
-          else setControlsVisible(false);
+          if (ready) {
+            setKimiHeaderFallback(false);
+            pushKimiStatus();
+          } else {
+            setControlsVisible(false);
+          }
           return;
         }
         if (data.startsWith('zshell:kimi-theme:')) {
@@ -380,6 +462,12 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           onBack();
           return;
         }
+        if (data === 'zshell:kimi-switch') {
+          if (!foreground || !canSwitch) return;
+          setControlsVisible(false);
+          setSwitcherOpen(true);
+          return;
+        }
         if (data === 'zshell:kimi-downloads') {
           if (!foreground) return;
           setControlsVisible(false);
@@ -391,6 +479,11 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           reloadRef.current('current-page');
           return;
         }
+        if (data === 'zshell:kimi-reconnect') {
+          if (!foreground) return;
+          reloadRef.current();
+          return;
+        }
       }
       if (zcodeConsole) {
         if (data === 'zshell:zcode-header-on' || data === 'zshell:zcode-header-off') {
@@ -399,6 +492,10 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           if (ready) {
             pushZcodeStatus();
           }
+          return;
+        }
+        if (data.startsWith('zshell:zcode-topbar-miss:')) {
+          logDiag('zcode-topbar-miss', data.slice('zshell:zcode-topbar-miss:'.length));
           return;
         }
         if (data === 'zshell:zcode-home') {
@@ -413,6 +510,11 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         if (data === 'zshell:zcode-back') {
           if (!foreground) return;
           onBack();
+          return;
+        }
+        if (data === 'zshell:zcode-switch') {
+          if (!foreground || !canSwitch) return;
+          setSwitcherOpen(true);
           return;
         }
         if (data === 'zshell:zcode-downloads') {
@@ -453,7 +555,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
         }
       }
     },
-    [notify, notifyIdBase, brand, isKimi, isZcode, foreground, pushKimiStatus, pushZcodeStatus, handleWebBack, onBack, onOpenDownloads, syncTopbarActivity],
+    [notify, notifyIdBase, brand, isKimi, isZcode, foreground, canSwitch, pushKimiStatus, pushZcodeStatus, handleWebBack, onBack, onOpenDownloads, syncTopbarActivity],
   );
 
   const reload = useCallback((mode?: 'current-page', fromAutoCrash = false) => {
@@ -469,16 +571,15 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     attempt.current = {startedAt: performance.now()};
     setFailureReport('');
     setKimiHeaderReady(false);
+    setKimiHeaderFallback(false);
     setZcodePage('other');
     statusRef.current = 'connecting';
     setStatus('connecting');
     setLoadFailed(false);
     setNeedsLogin(false);
     setControlsVisible(false);
-    // A full page load cannot complete an OAuth popup started earlier; leaving
-    // the overlay up would cover the reloaded console forever.
-    setAuthWindowUrl(null);
-    setAuthCurrentHost('');
+    setSwitcherOpen(false);
+    closeAuthOverlay();
     if (mode === 'current-page' && webviewRef.current) {
       // Keep the live renderer and refresh the current console document.
       setCover('reloading');
@@ -487,7 +588,7 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     setCover('opening');
     canGoBackRef.current = false;
     setReloadKey(k => k + 1);
-  }, []);
+  }, [closeAuthOverlay]);
   reloadRef.current = reload;
 
   const loadFailedRef = useRef(false);
@@ -562,10 +663,9 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     logDiag('login-observed', login);
     onLoginState?.(machine.id, login);
     if (login === 'logged-in') {
-      setAuthWindowUrl(null);
-      setAuthCurrentHost('');
+      closeAuthOverlay();
     }
-  }, [isKimi, machine.id, onLoginState]);
+  }, [isKimi, machine.id, onLoginState, closeAuthOverlay]);
 
   const handleOpenWindow = useCallback((event: WebViewOpenWindowEvent) => {
     if (!foreground || AppState.currentState !== 'active') return;
@@ -582,6 +682,8 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
     if (isKimiAuthPopup || isZcodeAuthPopup) {
       setAuthWindowUrl(target);
       setAuthCurrentHost(host);
+      setAuthCanGoBack(false);
+      setAuthLoadProgress(0.12);
     } else {
       openInBrowser(target).catch(() => Alert.alert('无法打开浏览器'));
     }
@@ -661,23 +763,29 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
 
   const renderFailure = (message: string, retry: () => void) => (
     <View style={styles.errorBox} accessibilityLiveRegion="polite">
-      <Text style={styles.noticeTitle}>{message}</Text>
-      <View style={styles.noticeActions}>
-        <TouchableOpacity style={styles.backButton} onPress={onBack} accessibilityRole="button">
-          <Text style={styles.backText}>返回列表</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.retryButton} onPress={retry} accessibilityRole="button">
-          <Text style={styles.retryText}>重试</Text>
-        </TouchableOpacity>
+      <View style={styles.errorCard}>
+        <View style={styles.errorIconWrap}>
+          <Icon name="info" size={24} color={colors.danger} />
+        </View>
+        <Text style={styles.noticeTitle}>{message}</Text>
+        <Text style={[font.faint, {textAlign: 'center'}]}>{machine.name}</Text>
+        <View style={styles.noticeActions}>
+          <TouchableOpacity style={styles.secondaryPillButton} onPress={onBack} accessibilityRole="button">
+            <Text style={styles.secondaryPillText}>返回列表</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.retryButton} onPress={retry} accessibilityRole="button">
+            <Text style={styles.retryText}>重试</Text>
+          </TouchableOpacity>
+        </View>
+        {failureReport !== '' && (
+          <TouchableOpacity style={styles.diagCopyButton} accessibilityRole="button" onPress={() => {
+            Clipboard.setString(failureReport);
+            ToastAndroid.show('已复制本次诊断', ToastAndroid.SHORT);
+          }}>
+            <Text style={styles.diagCopyText}>复制本次诊断</Text>
+          </TouchableOpacity>
+        )}
       </View>
-      {failureReport !== '' && (
-        <TouchableOpacity style={styles.backButton} accessibilityRole="button" onPress={() => {
-          Clipboard.setString(failureReport);
-          ToastAndroid.show('已复制本次诊断', ToastAndroid.SHORT);
-        }}>
-          <Text style={styles.backText}>复制本次诊断</Text>
-        </TouchableOpacity>
-      )}
     </View>
   );
   const connectionHint = needsLogin ? '请在上方登录 Kimi 账号' :
@@ -689,6 +797,13 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       }
     };
   }, []);
+
+  const showFooter = isKimi
+    ? (kimiHeaderReady && controlsVisible) ||
+      (kimiHeaderFallback && cover === 'hidden' && !needsLogin && !loadFailed)
+    : isZcode
+      ? shouldShowZcodeFooter(zcodePage, status, loadFailed)
+      : true;
 
   return (
     <View style={styles.root}>
@@ -757,27 +872,34 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       {cover === 'hidden' && !loadFailed && connectionHint && (
         <View style={styles.connectionHint} accessibilityLiveRegion="polite">
           <Text style={[font.dim, styles.hintText]}>{connectionHint}</Text>
-          <TouchableOpacity style={styles.backButton} onPress={onBack} accessibilityRole="button">
+          <TouchableOpacity style={styles.hintAction} onPress={onBack} accessibilityRole="button">
             <Text style={styles.backText}>返回列表</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {(isKimi
-        ? kimiHeaderReady && controlsVisible
-        : isZcode
-          ? shouldShowZcodeFooter(zcodePage, status, loadFailed)
-          : true) ? (
+      {showFooter ? (
       <View style={[styles.consoleFooter, kimiHeaderReady && styles.kimiMenu]}>
         {controlsVisible ? (
           <View style={styles.controlBar}>
-            <TouchableOpacity onPress={onBack} style={styles.backButton}>
-              <Text style={styles.backText}>‹ 返回列表</Text>
+            <TouchableOpacity onPress={onBack} style={styles.backButton} accessibilityRole="button">
+              <Icon name="chevron-left" size={16} color={colors.accent} />
+              <Text style={styles.backText}>列表</Text>
             </TouchableOpacity>
             <View style={[styles.statusDot, {backgroundColor: statusDetails.color}]} />
             <Text style={styles.title} numberOfLines={1}>
               {machine.name}
             </Text>
+            {canSwitch ? (
+              <TouchableOpacity
+                onPress={() => {
+                  setControlsVisible(false);
+                  setSwitcherOpen(true);
+                }}
+                style={styles.reloadButton}>
+                <Text style={styles.reloadText}>切机</Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               onPress={() => {
                 showControls();
@@ -811,12 +933,16 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
 
       {(cover === 'opening' || cover === 'reloading') && !loadFailed && (
         <View style={styles.paintCover} accessibilityLiveRegion="polite">
-          <ActivityIndicator color={colors.textDim} />
+          <View style={styles.coverBadge}>
+            <Icon name="terminal" size={26} color={colors.accent} />
+          </View>
+          <ActivityIndicator color={colors.accent} />
           <Text style={styles.noticeTitle}>
             {cover === 'reloading' ? '正在重新加载控制台' : '正在加载控制台'}
           </Text>
-          <TouchableOpacity style={styles.backButton} onPress={onBack} accessibilityRole="button">
-            <Text style={styles.backText}>返回列表</Text>
+          <Text style={font.faint}>{machine.name}</Text>
+          <TouchableOpacity style={styles.secondaryPillButton} onPress={onBack} accessibilityRole="button">
+            <Text style={styles.secondaryPillText}>返回列表</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -832,22 +958,37 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
       {authWindowUrl != null && authWebSource != null && (
         <View style={styles.authOverlay}>
           <View style={styles.authBar}>
-            <View style={styles.authSide} />
+            <TouchableOpacity
+              style={[styles.authIconBtn, !authCanGoBack && styles.authIconDisabled]}
+              disabled={!authCanGoBack}
+              accessibilityRole="button"
+              accessibilityLabel="授权页返回上一页"
+              onPress={() => authWebViewRef.current?.goBack()}>
+              <Icon name="chevron-left" size={18} color={colors.text} />
+            </TouchableOpacity>
             <Text style={styles.authTitle} numberOfLines={1}>
               {authCurrentHost || authHostOf(authWindowUrl)} · 授权登录
             </Text>
             <TouchableOpacity
-              style={styles.authClose}
+              style={styles.authIconBtn}
               accessibilityRole="button"
               accessibilityLabel="关闭授权页"
-              onPress={() => {
-                setAuthWindowUrl(null);
-                setAuthCurrentHost('');
-              }}>
-              <Text style={styles.authCloseText}>✕</Text>
+              onPress={closeAuthOverlay}>
+              <Icon name="close" size={17} color={colors.textDim} />
             </TouchableOpacity>
           </View>
+          {authLoadProgress > 0 && authLoadProgress < 1 ? (
+            <View style={styles.authProgressTrack}>
+              <View
+                style={[
+                  styles.authProgressFill,
+                  {width: `${Math.max(8, Math.round(authLoadProgress * 100))}%`},
+                ]}
+              />
+            </View>
+          ) : null}
           <WebView<object>
+            ref={authWebViewRef}
             source={authWebSource}
             injectedJavaScriptBeforeContentLoaded={authPatchSource}
             javaScriptEnabled
@@ -855,9 +996,13 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
             cacheEnabled={false}
             originWhitelist={['https://*', 'about:blank']}
             onShouldStartLoadWithRequest={handleShouldStartAuth}
+            onLoadProgress={({nativeEvent}) => {
+              setAuthLoadProgress(nativeEvent.progress);
+            }}
             onNavigationStateChange={(nav: WebViewNavigation) => {
               const h = typeof nav.url === 'string' ? authHostOf(nav.url) : '';
               if (h) setAuthCurrentHost(h);
+              setAuthCanGoBack(Boolean(nav.canGoBack));
             }}
             style={styles.webview}
             setSupportMultipleWindows
@@ -866,6 +1011,67 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
           />
         </View>
       )}
+
+      <BottomSheet visible={foreground && switcherOpen} onClose={() => setSwitcherOpen(false)}>
+        <View style={styles.sheetHeader}>
+          <Text style={styles.sheetTitle}>切换机器</Text>
+          <TouchableOpacity
+            style={styles.authIconBtn}
+            onPress={() => setSwitcherOpen(false)}
+            accessibilityRole="button"
+            accessibilityLabel="关闭切换机器">
+            <Icon name="close" size={17} color={colors.textDim} />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.switchList}>
+          {(switchTargets ?? []).map(target => {
+            const isCurrent = target.id === machine.id;
+            return (
+              <TouchableOpacity
+                key={target.id}
+                style={[styles.switchRow, isCurrent && styles.switchRowCurrent]}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setSwitcherOpen(false);
+                  if (!isCurrent) {
+                    onSwitchMachine?.(target.id);
+                  }
+                }}>
+                <View
+                  style={[
+                    styles.switchBadge,
+                    {backgroundColor: target.kind === 'kimi' ? colors.iconBadgeBg : colors.zcodeBadgeBg},
+                  ]}>
+                  <Icon
+                    name="terminal"
+                    size={17}
+                    color={target.kind === 'kimi' ? colors.accent : colors.textDim}
+                  />
+                </View>
+                <View style={{flex: 1, gap: 2}}>
+                  <Text style={styles.switchName} numberOfLines={1}>
+                    {target.name}
+                  </Text>
+                  <Text style={font.faint}>
+                    {target.kind === 'kimi' ? 'Kimi Code' : 'ZCode'}
+                  </Text>
+                </View>
+                {target.active ? (
+                  <View style={styles.switchLive}>
+                    <View style={styles.switchLiveDot} />
+                    <Text style={styles.switchLiveText}>运行中</Text>
+                  </View>
+                ) : null}
+                {isCurrent ? (
+                  <View style={styles.currentPill}>
+                    <Text style={styles.currentPillText}>当前</Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </BottomSheet>
     </View>
   );
 }
@@ -873,33 +1079,31 @@ export function ConsoleScreen({machine, foreground, onBack, registerBackHandler,
 const useStyles = makeStyles((colors, font) => ({
   root: {flex: 1, backgroundColor: colors.consoleBg},
   consoleFooter: {
-    height: 44,
-    paddingHorizontal: 8,
+    height: 46,
+    paddingHorizontal: 12,
     justifyContent: 'center',
     backgroundColor: colors.consoleBg,
   },
   kimiMenu: {
     position: 'absolute',
-    top: 48,
-    left: 8,
-    right: 8,
-    borderRadius: radius.m,
+    top: 50,
+    left: 10,
+    right: 10,
+    borderRadius: radius.l,
     backgroundColor: colors.bgElevated,
-    elevation: 4,
-    shadowColor: colors.text,
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    shadowOffset: {width: 0, height: 4},
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    elevation: 6,
   },
   controlBar: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
   },
   statusPill: {
     alignSelf: 'flex-start',
-    minHeight: 32,
+    minHeight: 30,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -907,16 +1111,22 @@ const useStyles = makeStyles((colors, font) => ({
     borderRadius: radius.s,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
-    paddingHorizontal: 10,
+    paddingHorizontal: 11,
     paddingVertical: 5,
   },
   pillText: {...font.pill, color: colors.textDim},
-  backButton: {paddingHorizontal: 10, paddingVertical: 8},
-  backText: {color: colors.accent, fontSize: 15},
-  title: {...font.body, flex: 1, textAlign: 'center'},
-  reloadButton: {paddingHorizontal: 12, paddingVertical: 8},
-  reloadText: {color: colors.accent, fontSize: 14},
-  statusDot: {width: 8, height: 8, borderRadius: 4},
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  backText: {color: colors.accent, fontSize: 14, fontWeight: '500'},
+  title: {...font.body, fontWeight: '600', flex: 1, textAlign: 'center'},
+  reloadButton: {paddingHorizontal: 10, paddingVertical: 6},
+  reloadText: {color: colors.accent, fontSize: 14, fontWeight: '500'},
+  statusDot: {width: 7, height: 7, borderRadius: 4},
   webview: {flex: 1, backgroundColor: colors.consoleBg},
   paintCover: {
     ...StyleSheet.absoluteFillObject,
@@ -926,63 +1136,174 @@ const useStyles = makeStyles((colors, font) => ({
     padding: 24,
     backgroundColor: colors.consoleBg,
   },
-  noticeTitle: {...font.body, textAlign: 'center'},
+  coverBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 17,
+    backgroundColor: colors.iconBadgeBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  noticeTitle: {fontSize: 16, fontWeight: '600', color: colors.text, textAlign: 'center'},
   noticeActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+    marginTop: 6,
   },
   connectionHint: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     backgroundColor: colors.bgElevated,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
   hintText: {flex: 1},
+  hintAction: {paddingHorizontal: 10, paddingVertical: 6},
   errorBox: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    padding: 32,
+    padding: 24,
     backgroundColor: colors.bg,
+  },
+  errorCard: {
+    width: '100%',
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    padding: 24,
+    alignItems: 'center',
+    gap: 10,
+  },
+  errorIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: colors.dangerSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
   },
   retryButton: {
     backgroundColor: colors.accent,
-    paddingHorizontal: 28,
+    paddingHorizontal: 26,
     paddingVertical: 11,
-    borderRadius: radius.m,
+    borderRadius: radius.s,
   },
-  retryText: {color: colors.onAccent, fontSize: 15, fontWeight: '600'},
+  retryText: {color: colors.onAccent, fontSize: 14, fontWeight: '600'},
+  secondaryPillButton: {
+    backgroundColor: colors.bgInput,
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    borderRadius: radius.s,
+  },
+  secondaryPillText: {color: colors.text, fontSize: 14, fontWeight: '500'},
+  diagCopyButton: {paddingHorizontal: 14, paddingVertical: 6, marginTop: 2},
+  diagCopyText: {color: colors.accent, fontSize: 13, fontWeight: '500'},
   authOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.bg,
     elevation: 10,
   },
   authBar: {
-    height: 52,
+    height: 56,
     backgroundColor: colors.bgElevated,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
   authTitle: {...font.body, flex: 1, textAlign: 'center', fontWeight: '600'},
-  authSide: {width: 40},
-  authClose: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  authIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.bgInput,
   },
-  authCloseText: {color: colors.textDim, fontSize: 16},
+  authIconDisabled: {opacity: 0.35},
+  authProgressTrack: {
+    height: 2,
+    backgroundColor: colors.bgInput,
+    overflow: 'hidden',
+  },
+  authProgressFill: {
+    height: 2,
+    backgroundColor: colors.accent,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sheetTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  switchList: {
+    gap: 8,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.bgInput,
+    borderRadius: radius.l,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  switchRowCurrent: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+  },
+  switchBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  switchName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  switchLive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  switchLiveDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: colors.success,
+  },
+  switchLiveText: {
+    color: colors.success,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  currentPill: {
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.s,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+  },
+  currentPillText: {
+    color: colors.accent,
+    fontSize: 11,
+    fontWeight: '600',
+  },
 }));

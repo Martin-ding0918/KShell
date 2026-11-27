@@ -10,27 +10,47 @@ export function buildKimiThemePrelude(scheme: ColorScheme, colors: Record<ColorS
   try {
     if (window.top !== window || !/^code-rc\.kimi\.(com|ai)$/.test(location.hostname) ||
         location.protocol !== 'https:' || !location.pathname.startsWith('/devices/')) return;
+    var palette = ${JSON.stringify(colors)};
+    var readStored = function () {
+      var stored;
+      try { stored = localStorage.getItem('kimi-web.color-scheme'); } catch (_) {}
+      return stored === 'light' || stored === 'dark' ? stored : null;
+    };
+    var writeStyle = function (targetScheme, bg) {
+      var style = document.getElementById('kshell-kimi-document-theme');
+      if (!style) {
+        if (!document.head) return false;
+        style = document.createElement('style');
+        style.id = 'kshell-kimi-document-theme';
+        document.head.appendChild(style);
+      }
+      // The official stylesheet and later user theme changes retain priority.
+      style.textContent = ':where(html){color-scheme:' + targetScheme +
+        ';background-color:var(--color-bg,' + bg + ')}';
+      return true;
+    };
+    window.__zshellUpdateKimiTheme = function (nextScheme, nextBg) {
+      try {
+        var root = document.documentElement;
+        if (!root || root.getAttribute('data-color-scheme') !== 'system') return;
+        if (readStored() !== null) return;
+        var s = nextScheme === 'light' ? 'light' : 'dark';
+        var bg = /^#[0-9a-f]{6}$/i.test(nextBg || '') ? nextBg : palette[s];
+        writeStyle(s, bg);
+      } catch (_) {}
+    };
     var apply = function () {
       var root = document.documentElement;
       if (!root || !document.head) return false;
       if (document.getElementById('kshell-kimi-document-theme')) return true;
       if (root.getAttribute('data-color-scheme') !== 'system') return true;
-      var stored;
-      try { stored = localStorage.getItem('kimi-web.color-scheme'); } catch (_) {}
-      var explicit = stored === 'light' || stored === 'dark';
-      if (explicit) root.setAttribute('data-color-scheme', stored);
-      var scheme = explicit ? stored : ${JSON.stringify(scheme)};
-      var background = ${JSON.stringify(colors)}[scheme];
-      var style = document.createElement('style');
-      style.id = 'kshell-kimi-document-theme';
-      // The official stylesheet and later user theme changes retain priority.
-      style.textContent = ':where(html){color-scheme:' + scheme +
-        ';background-color:var(--color-bg,' + background + ')}';
-      document.head.appendChild(style);
-      // Diagnostic: proves on-device that the document-start pin actually ran
-      // (visible in the diag timeline; every earlier fix shipped unverifiable).
+      var explicit = readStored();
+      if (explicit) root.setAttribute('data-color-scheme', explicit);
+      var targetScheme = explicit || ${JSON.stringify(scheme)};
+      writeStyle(targetScheme, palette[targetScheme]);
+      // Diagnostic: proves on-device that the document-start pin actually ran.
       if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage('zshell:kimi-theme:' + scheme);
+        window.ReactNativeWebView.postMessage('zshell:kimi-theme:' + targetScheme);
       }
       return true;
     };
@@ -84,19 +104,29 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
       sel + ' .cv{flex:none;width:11px}',
       sel + ' > .ui-icon-button{flex:none;width:40px!important;height:40px!important}',
       sel + ' > [' + trailing + ']{margin-inline-start:auto!important}',
-      sel + ' > .zshell-status{flex:none;display:flex;align-items:center;gap:4px;height:30px;margin:0;padding:0 8px;border:1px solid var(--color-line,currentColor);border-radius:999px;background:var(--color-surface,transparent);color:inherit;font:inherit;font-size:11px;white-space:nowrap;cursor:pointer}',
-      '.zshell-status i{width:6px;height:6px;border-radius:50%;flex:none;background:var(--zshell-dot,#888)}',
-      '.zshell-menu{position:fixed;top:52px;right:8px;z-index:2147483000;display:flex;flex-direction:column;min-width:148px;padding:5px;border:1px solid var(--color-line,rgba(127,127,127,.28));border-radius:12px;background:var(--color-bg-elevated,var(--color-surface,#fff));box-shadow:0 10px 28px rgba(0,0,0,.2);font:inherit}',
-      '.zshell-menu button{all:unset;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:9px 10px;border-radius:8px;font-size:13px;cursor:pointer;color:inherit}',
+      sel + ' > .zshell-status{flex:none;display:flex;align-items:center;gap:5px;height:28px;margin:0;padding:0 10px;border:0;border-radius:999px;background:rgba(127,127,127,.13);color:inherit;font:inherit;font-size:11px;font-weight:600;white-space:nowrap;cursor:pointer;transition:background-color .15s}',
+      sel + ' > .zshell-status[data-zshell-reconnect]{background:rgba(248,113,113,.16);color:#f87171}',
+      '.zshell-status i{width:7px;height:7px;border-radius:50%;flex:none;background:var(--zshell-dot,#888)}',
+      '.zshell-menu{position:fixed;top:52px;right:10px;z-index:2147483000;display:flex;flex-direction:column;min-width:176px;padding:6px;border:1px solid var(--color-line,rgba(127,127,127,.22));border-radius:16px;background:var(--color-bg-elevated,var(--color-surface,#fff));box-shadow:0 12px 32px rgba(0,0,0,.26);font:inherit;gap:2px}',
+      '.zshell-menu button{all:unset;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px;border-radius:11px;font-size:13px;font-weight:500;cursor:pointer;color:inherit}',
       '.zshell-menu button:active{background:rgba(127,127,127,.16)}',
-      '.zshell-menu small{font-size:11px;opacity:.55}',
-      '@media(max-width:310px){' + sel + ' > .zshell-status{padding-inline:5px}' + sel + ' > .ui-icon-button{width:34px!important}.zshell-status span{display:none}}'
+      '.zshell-menu .zm-left{display:flex;align-items:center;gap:9px}',
+      '.zshell-menu svg{flex:none;opacity:.75}',
+      '.zshell-menu small{font-size:11px;opacity:.52;font-weight:400}',
+      '.zshell-menu .zm-div{height:1px;background:var(--color-line,rgba(127,127,127,.18));margin:4px 6px}',
+      '@media(max-width:310px){' + sel + ' > .zshell-status{padding-inline:6px}' + sel + ' > .ui-icon-button{width:34px!important}.zshell-status span{display:none}}'
     ].join('\n');
+    var ICO_BACK = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5 5.5 8 10 12.5"/></svg>';
+    var ICO_SWITCH = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="9" rx="2"/><path d="M5.5 7 7 8.5 5.5 10"/><path d="M8.5 10h2"/></svg>';
+    var ICO_DL = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7.5m0 0-3-3m3 3 3-3"/><path d="M3 12.5h10"/></svg>';
+    var ICO_RELOAD = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.3-3.4"/><path d="M13 3v2.5h-2.5"/></svg>';
     var active = null, action = null, dot = null, label = null, current = null, menu = null;
     var render = function () {
       if (!dot || !current) return;
       dot.style.setProperty('--zshell-dot', current.color);
       if (label && label.textContent !== current.short) label.textContent = current.short;
+      if (current.reconnect) dot.setAttribute('data-zshell-reconnect', '');
+      else dot.removeAttribute('data-zshell-reconnect');
       dot.setAttribute('aria-label', current.label + ' · KShell');
       dot.title = current.label;
     };
@@ -114,16 +144,22 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
       var m = document.createElement('div');
       m.className = 'zshell-menu';
       m.setAttribute('role', 'menu');
-      var item = function (text, hint, fn) {
+      var item = function (icon, text, hint, fn) {
         var b = document.createElement('button');
         b.type = 'button';
         b.setAttribute('role', 'menuitem');
+        var left = document.createElement('span');
+        left.className = 'zm-left';
+        left.innerHTML = icon;
         var t = document.createElement('span');
         t.textContent = text;
-        var h = document.createElement('small');
-        h.textContent = hint;
-        b.appendChild(t);
-        b.appendChild(h);
+        left.appendChild(t);
+        b.appendChild(left);
+        if (hint) {
+          var h = document.createElement('small');
+          h.textContent = hint;
+          b.appendChild(h);
+        }
         b.addEventListener('click', function (e) {
           e.stopPropagation();
           closeMenu();
@@ -131,9 +167,18 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
         });
         m.appendChild(b);
       };
-      item('返回列表', '结束当前视图', function () { post('zshell:kimi-back'); });
-      item('下载管理', '', function () { post('zshell:kimi-downloads'); });
-      item('重新加载', '', function () { post('zshell:kimi-reload'); });
+      var divider = function () {
+        var d = document.createElement('div');
+        d.className = 'zm-div';
+        m.appendChild(d);
+      };
+      item(ICO_BACK, '返回列表', '保持后台', function () { post('zshell:kimi-back'); });
+      if (current && current.canSwitch) {
+        item(ICO_SWITCH, '切换机器', '', function () { post('zshell:kimi-switch'); });
+      }
+      divider();
+      item(ICO_DL, '下载管理', '', function () { post('zshell:kimi-downloads'); });
+      item(ICO_RELOAD, '重新加载', '', function () { post('zshell:kimi-reload'); });
       document.body.appendChild(m);
       menu = m;
       document.addEventListener('click', dismissMenu, true);
@@ -198,8 +243,14 @@ export const KIMI_TOPBAR_PATCH = String.raw`(function () {
         label = dot.appendChild(document.createElement('span'));
         dot.addEventListener('click', function (e) {
           e.stopPropagation();
-          if (menu) closeMenu();
-          else openMenu();
+          if (current && current.reconnect) {
+            closeMenu();
+            post('zshell:kimi-reconnect');
+          } else if (menu) {
+            closeMenu();
+          } else {
+            openMenu();
+          }
         });
         active.insertBefore(dot, main ? main.nextSibling : action);
         if (action) action.setAttribute(trailing, '');
