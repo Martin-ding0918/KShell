@@ -1,10 +1,11 @@
 import {NativeModules} from 'react-native';
-import type {ThemeMode} from './theme';
+import type {ColorScheme, ThemeMode} from './theme';
 
 interface ZShellAppearanceModule {
   /** Exported constant (legacy-module constants surface as properties). */
   themeMode?: string;
   getConstants?: () => {themeMode?: string};
+  getSystemColorScheme?: () => Promise<string>;
   setThemeMode(mode: ThemeMode): void;
   setConsoleBarColor(color: string | null): void;
 }
@@ -27,6 +28,15 @@ export function loadThemeMode(): ThemeMode {
     return parseMode(native?.themeMode ?? native?.getConstants?.().themeMode);
   } catch {
     return 'system';
+  }
+}
+
+export async function getSystemColorScheme(): Promise<ColorScheme | null> {
+  try {
+    const raw = await native?.getSystemColorScheme?.();
+    return raw === 'light' || raw === 'dark' ? raw : null;
+  } catch {
+    return null;
   }
 }
 

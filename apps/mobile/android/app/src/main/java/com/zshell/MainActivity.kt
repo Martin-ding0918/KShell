@@ -117,8 +117,22 @@ class MainActivity : ReactActivity() {
    * flip the bar icon contrast to match.
    */
   @Suppress("DEPRECATION")
-  fun applySystemBars() {
-    val bg = consoleBarColor ?: ContextCompat.getColor(this, R.color.app_background)
+  fun applySystemBars(configOverride: Configuration? = null) {
+    val night = when (AppearanceModule.storedMode(this)) {
+      "light" -> false
+      "dark" -> true
+      else -> AppearanceModule.isNightConfig(
+          configOverride ?: applicationContext.resources.configuration)
+    }
+    val resContext = if (AppearanceModule.isNightConfig(resources.configuration) == night) {
+      this
+    } else {
+      val cfg = Configuration(resources.configuration)
+      cfg.uiMode = (cfg.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+          if (night) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+      createConfigurationContext(cfg)
+    }
+    val bg = consoleBarColor ?: ContextCompat.getColor(resContext, R.color.app_background)
     val lightBg = ColorUtils.calculateLuminance(bg) > 0.5
     window.setBackgroundDrawable(ColorDrawable(bg))
     // On edge-to-edge Android the system bars can be transparent; the content
@@ -138,7 +152,15 @@ class MainActivity : ReactActivity() {
 
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
+    val systemConfig = if (AppearanceModule.storedMode(this) == "system") newConfig else null
+    applySystemBars(systemConfig)
+    AppearanceModule.syncReactAppearance(getReactHost()?.currentReactContext, this, systemConfig)
+  }
+
+  override fun onNightModeChanged(mode: Int) {
+    super.onNightModeChanged(mode)
     applySystemBars()
+    AppearanceModule.syncReactAppearance(getReactHost()?.currentReactContext, this)
   }
 
   /**
@@ -161,5 +183,12 @@ class MainActivity : ReactActivity() {
   override fun onResume() {
     super.onResume()
     window.decorView.visibility = android.view.View.VISIBLE
+    if (AppearanceModule.storedMode(this) == "system" &&
+        AppearanceModule.isNightConfig(resources.configuration) !=
+            AppearanceModule.isNightConfig(applicationContext.resources.configuration)) {
+      delegate.applyDayNight()
+    }
+    applySystemBars()
+    AppearanceModule.syncReactAppearance(getReactHost()?.currentReactContext, this)
   }
 }

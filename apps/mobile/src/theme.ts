@@ -1,5 +1,6 @@
-import React, {createContext, useContext, useMemo} from 'react';
-import {StyleSheet, TextStyle, useColorScheme} from 'react-native';
+import React, {createContext, useContext, useEffect, useMemo, useState} from 'react';
+import {Appearance, AppState, StyleSheet, TextStyle, useColorScheme} from 'react-native';
+import {getSystemColorScheme} from './appearance';
 
 export type ColorScheme = 'light' | 'dark';
 /** User preference: follow the OS, or force one scheme. */
@@ -149,11 +150,47 @@ const ThemeContext = createContext<Theme>(themes.dark);
 
 /** Resolves the effective scheme: the user's override, else the OS setting. */
 export function useResolvedScheme(mode: ThemeMode): ColorScheme {
-  const system = useColorScheme();
+  const rnSystem = useColorScheme();
+  const [syncedSystem, setSyncedSystem] = useState<ColorScheme | null>(null);
+
+  useEffect(() => {
+    if (mode !== 'system') {
+      return;
+    }
+    let cancelled = false;
+    const sync = () => {
+      getSystemColorScheme().then(scheme => {
+        if (!cancelled && scheme != null) {
+          setSyncedSystem(scheme);
+        }
+      });
+    };
+    sync();
+    const appearanceSub = Appearance.addChangeListener(({colorScheme}) => {
+      if (colorScheme === 'light' || colorScheme === 'dark') {
+        setSyncedSystem(colorScheme);
+      } else {
+        setSyncedSystem(null);
+      }
+    });
+    const appStateSub = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        sync();
+      }
+    });
+    return () => {
+      cancelled = true;
+      appearanceSub.remove();
+      appStateSub.remove();
+    };
+  }, [mode]);
+
   if (mode !== 'system') {
     return mode;
   }
-  return system === 'light' ? 'light' : 'dark';
+  const effective =
+    syncedSystem ?? (rnSystem === 'light' || rnSystem === 'dark' ? rnSystem : null);
+  return effective === 'light' ? 'light' : 'dark';
 }
 
 export function ThemeProvider({

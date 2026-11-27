@@ -7,6 +7,7 @@ import {Modal, ScrollView, Switch, Text, TouchableOpacity} from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import {installVerifier, makeVerifier} from '@zshell/core-shell';
 import App from '../App';
+import * as appearance from '../src/appearance';
 import * as downloads from '../src/downloads';
 import * as securekdf from '../src/securekdf';
 import {ConsentGate} from '../src/screens/ConsentGate';
@@ -16,7 +17,7 @@ import {DownloadsScreen} from '../src/screens/DownloadsScreen';
 import {MachineListScreen} from '../src/screens/MachineListScreen';
 import {PermissionsScreen} from '../src/screens/PermissionsScreen';
 import {SettingsScreen} from '../src/screens/SettingsScreen';
-import {ThemeProvider} from '../src/theme';
+import {ThemeProvider, useResolvedScheme} from '../src/theme';
 import * as updater from '../src/updater';
 
 jest.mock('react-native-webview', () => {
@@ -400,5 +401,59 @@ test('ConsoleScreen keeps auth overlay WebView source stable across cross-host O
   } finally {
     await ReactTestRenderer.act(async () => renderer.unmount());
     AppState.currentState = prevAppState;
+  }
+});
+
+test('useResolvedScheme resyncs OS dark mode on foreground resume after background toggle', async () => {
+  const {Appearance, AppState} = require('react-native');
+  let appStateListener: ((state: string) => void) | null = null;
+  let appearanceListener: ((prefs: {colorScheme: 'light' | 'dark' | null}) => void) | null = null;
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((...args: unknown[]) => {
+    if (args[0] === 'change' && typeof args[1] === 'function') {
+      appStateListener = args[1] as (state: string) => void;
+    }
+    return {remove: jest.fn()};
+  });
+  jest.spyOn(Appearance, 'addChangeListener').mockImplementation((...args: unknown[]) => {
+    if (typeof args[0] === 'function') {
+      appearanceListener = args[0] as (prefs: {colorScheme: 'light' | 'dark' | null}) => void;
+    }
+    return {remove: jest.fn()};
+  });
+  const queryScheme = jest
+    .spyOn(appearance, 'getSystemColorScheme')
+    .mockResolvedValueOnce('light')
+    .mockResolvedValueOnce('dark');
+
+  function Probe() {
+    const scheme = useResolvedScheme('system');
+    return <Text>{scheme}</Text>;
+  }
+
+  let renderer!: ReturnType<typeof ReactTestRenderer.create>;
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<Probe />);
+  });
+
+  try {
+    expect(renderer.root.findByType(Text).props.children).toBe('light');
+
+    // Phone switches to dark mode while KShell is backgrounded without firing
+    // RN Appearance change; returning to foreground must re-query and switch.
+    await ReactTestRenderer.act(async () => {
+      appStateListener?.('background');
+      appStateListener?.('active');
+    });
+    expect(queryScheme).toHaveBeenCalledTimes(2);
+    expect(renderer.root.findByType(Text).props.children).toBe('dark');
+
+    // Subsequent foreground RN Appearance change still updates immediately.
+    await ReactTestRenderer.act(async () => {
+      appearanceListener?.({colorScheme: 'light'});
+    });
+    expect(renderer.root.findByType(Text).props.children).toBe('light');
+  } finally {
+    await ReactTestRenderer.act(async () => renderer.unmount());
+    jest.restoreAllMocks();
   }
 });

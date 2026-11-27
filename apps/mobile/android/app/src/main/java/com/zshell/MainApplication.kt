@@ -1,6 +1,7 @@
 package com.zshell
 
 import android.app.Application
+import android.content.res.Configuration
 import androidx.appcompat.app.AppCompatDelegate
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
@@ -10,7 +11,10 @@ import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 
 class MainApplication : Application(), ReactApplication {
 
+  @Volatile private var reactHostInitialized = false
+
   override val reactHost: ReactHost by lazy {
+    reactHostInitialized = true
     getDefaultReactHost(
       context = applicationContext,
       packageList =
@@ -28,5 +32,14 @@ class MainApplication : Application(), ReactApplication {
     AppCompatDelegate.setDefaultNightMode(
         AppearanceModule.nightModeFor(AppearanceModule.storedMode(this)))
     loadReactNative(this)
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    // System dark/light toggles while the Activity is backgrounded reach
+    // Application.onConfigurationChanged even when Activity delivery is deferred.
+    if (reactHostInitialized) {
+      AppearanceModule.syncReactAppearance(reactHost.currentReactContext, this, newConfig)
+    }
   }
 }

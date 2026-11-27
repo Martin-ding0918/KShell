@@ -1,12 +1,16 @@
 package com.zshell
 
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Color
 import androidx.appcompat.app.AppCompatDelegate
+import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.UiThreadUtil
+import com.facebook.react.modules.appearance.AppearanceModule as RnAppearanceModule
 
 /**
  * Light / dark preference bridge. The mode is kept in SharedPreferences and
@@ -14,7 +18,8 @@ import com.facebook.react.bridge.UiThreadUtil
  * frame on a cold start (see MainApplication.onCreate) and system dialogs
  * follow the in-app choice too. MainActivity declares uiMode in configChanges,
  * so switching never recreates the activity (keep-alive consoles survive);
- * MainActivity.onConfigurationChanged refreshes the window colors instead.
+ * MainActivity refreshes window colors and syncs React Native's Appearance
+ * module on configuration change, night-mode change, and foreground resume.
  */
 class AppearanceModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -35,12 +40,45 @@ class AppearanceModule(reactContext: ReactApplicationContext) :
           "dark" -> AppCompatDelegate.MODE_NIGHT_YES
           else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
         }
+
+    @JvmStatic
+    fun isNightConfig(config: Configuration): Boolean =
+        (config.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
+    /**
+     * Resolve the OS-level light/dark scheme. Reading Application resources
+     * avoids stale Activity configurations after background uiMode changes on
+     * Android / OEM ROMs (e.g. HyperOS) where Activity delivery is deferred.
+     */
+    @JvmStatic
+    fun systemColorScheme(context: Context, config: Configuration? = null): String {
+      val cfg = config ?: context.applicationContext.resources.configuration
+      return if (isNightConfig(cfg)) "dark" else "light"
+    }
+
+    /** Push the current OS scheme to React Native's AppearanceModule when active. */
+    @JvmStatic
+    fun syncReactAppearance(
+        reactContext: ReactContext?,
+        context: Context,
+        config: Configuration? = null,
+    ) {
+      val ctx = reactContext ?: return
+      if (!ctx.hasActiveReactInstance()) return
+      val rnAppearance = ctx.getNativeModule(RnAppearanceModule::class.java) ?: return
+      rnAppearance.emitAppearanceChanged(systemColorScheme(context, config))
+    }
   }
 
   override fun getName() = "ZShellAppearance"
 
   override fun getConstants(): Map<String, Any> =
       mapOf("themeMode" to storedMode(reactApplicationContext))
+
+  @ReactMethod
+  fun getSystemColorScheme(promise: Promise) {
+    promise.resolve(systemColorScheme(reactApplicationContext))
+  }
 
   @ReactMethod
   fun setConsoleBarColor(color: String?) {
@@ -64,6 +102,7 @@ class AppearanceModule(reactContext: ReactApplicationContext) :
       if (activity is MainActivity) {
         activity.applySystemBars()
       }
+      syncReactAppearance(reactApplicationContext, reactApplicationContext)
     }
   }
 }
